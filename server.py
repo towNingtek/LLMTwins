@@ -1,18 +1,15 @@
 import json
-# import sqlite3
 from fastapi import FastAPI, HTTPException
 from dotenv import load_dotenv
-from database import initDB, selectFromDB, saveProfileToDB, \
-    saveAPITableToDB, deleteFromDB, listFromDB
+from database import initDB, selectFromDB, \
+    deleteFromDB, listFromDB, \
+    insertOrUpdateProfile, insertOrUpdateAPITable
 from models import regUser, getUser, prompt
 from LLM.LLMTwins import DigitalTwins
 
 # Load environment variables from .env file
 load_dotenv()
 app = FastAPI()
-
-# Instances of digital twins are stored in this dictionary
-dt_instances = {}
 
 # Initialize database
 conn, cursor = initDB()
@@ -27,29 +24,21 @@ async def register_llm_twins(user: regUser):
     # Check if user is already registered
     result = selectFromDB(conn, "llm_twins", "name", user.name)
 
-    if result is not None:
-        # Return 404 response
-        raise HTTPException(status_code = 404, detail = "Digital Twin for this user is already registered")
-
+    # Register or update digital twins
     dt = DigitalTwins()
     result, profile, api_table = dt.register_llm_twins(user.name, user.description)
 
-    if (result):
-        profile["名稱"] = user.name
-        dt_instances[profile["名稱"]] = profile
-    else:
-        # Return 404 response
-        raise HTTPException(status_code = 404, detail = "Digital Twin for this user is not registered")
-
-    # Save profile to database
-    result = saveProfileToDB(conn, user)
-
-    # Save API table
+    # Insert or update profile
     if (result == True):
-        result = saveAPITableToDB(conn, user, api_table)
+        result = insertOrUpdateProfile(conn, "llm_twins", "name", user.name, profile)
+
+    # Insert or update API table
+    if (result == True):
+        result = insertOrUpdateAPITable(conn, "llm_twins_api", "name", user.name, api_table)
 
     # Return Profile & API Table
-    return {"profile": profile, "api_table": api_table}
+    profile["api_table"]  = api_table
+    return profile
 
 # Get LLM Digital Twins with User ID
 @app.post("/get_llm_twins")
@@ -90,7 +79,6 @@ async def delete_llm_twins(user: getUser):
         # Return 404 response
         raise HTTPException(status_code = 404, detail = "Digital Twin for this user is not registered")
 
-    # TODO: Delete from dt_instances
     return {"message": "Digital Twin for this user has been deleted"}
 
 # List all LLM Digital Twins
@@ -118,25 +106,20 @@ async def intent_recognition(prompt: prompt):
         raise HTTPException(status_code = 404, detail = "API table for this user is not registered")
 
     dt = DigitalTwins()
-    result, message = dt.intent_recognition(prompt.message)
+    result, message = dt.intent_recognition(prompt.role, prompt.message)
 
     return {"result": result, "message": message}
 
-@app.post("/prompt_llm_twins")
-async def prompt_llm_twins(prompt: prompt):
+@app.post("/callbacks")
+async def callbacks(prompt: prompt):
     # Get user from database
     profile = selectFromDB(conn, "llm_twins", "name", prompt.role)
 
     if profile is None:
         raise HTTPException(status_code = 404, detail = "Digital Twin for this user is not registered")
 
-    # Get intent from database
-    api_table = selectFromDB(conn, "llm_twins_api", "name", prompt.role)
-
-    if api_table is None:
-        raise HTTPException(status_code = 404, detail = "API table for this user is not registered")
-
+    # Run callback function
     dt = DigitalTwins()
-    result = dt.prompt_llm_twins(prompt.role, profile[1] ,prompt.message, api_table)
+    result = dt.callback(prompt.message)
 
     return {"result": result}

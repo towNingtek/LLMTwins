@@ -1,5 +1,4 @@
 import os
-import json
 import pygsheets
 import importlib.util
 from langchain_openai import ChatOpenAI
@@ -32,6 +31,7 @@ class DigitalTwins:
         self.service = initialize_drive_service(os.getenv("CREDENTIALS_FILE"))
         self.api_table = {}
 
+    # Update_llm_twins function
     def register_llm_twins(self, name, description):
         list_llm_name = list_files_in_drive_folder(self.service, os.getenv("GDRIVE_LLM_ROOT_PATH"))
         file_id = None
@@ -51,19 +51,22 @@ class DigitalTwins:
         # 使用 pygsheets 打開匹配的文件
         gc = pygsheets.authorize(service_file = os.getenv("CREDENTIALS_FILE"))
         sh = gc.open_by_url("https://docs.google.com/spreadsheets/d/" + file_id + "/edit?usp=sharing")
+        worksheet = sh.worksheet_by_title("Profile")
 
         # 寫入資料
         worksheet = sh.worksheet_by_title("Profile")
         write_to_cell(worksheet, "B1", name)
         write_to_cell(worksheet, "B2", description)
 
-        profile = extract_profile_from_sheet(sh[0])  # 假定數據在第一個工作表
-
-        # Register API table
+        # 讀取 APIs 表
         worksheet = sh.worksheet_by_title("APIs")
-        api_table = self.load_API_table(worksheet)
+        data = worksheet.get_all_values(include_tailing_empty_rows=False)
+        for index, row in enumerate(data):
+            if index != 0:  # 跳過第一行
+                if len(row) >= 2 and row[0] and row[1]:
+                    self.api_table[row[0]] = row[1]
 
-        return True, profile, api_table
+        return True, {"職稱":name, "描述": description}, self.api_table
 
     def prompt_llm_twins(self, role, desrtption, prompt, api_table):
         # 定義 SDGs 的問題
@@ -80,7 +83,27 @@ class DigitalTwins:
         else:
             return True, self.callback(str_api)
 
-    def load_API_table(self, worksheet):
+    def load_API_table(self, name):
+        list_llm_name = list_files_in_drive_folder(self.service, os.getenv("GDRIVE_LLM_ROOT_PATH"))
+        file_id = None
+        # 在 list_llm_name 中尋找匹配的文件名
+        matched_file = next((item for item in list_llm_name if item['name'] == name), None)
+        if not matched_file:
+            file_id = os.getenv("GSHEET_FOR_TEMPLATE_OF_LLM_PROFILE")
+            new_file_name = name
+            file_metadata = {
+                "name": new_file_name
+            }
+            response = self.service.files().copy(fileId=file_id, body=file_metadata).execute()
+            file_id = response.get('id')
+        else:
+            file_id = matched_file["file_id"]
+
+        # 使用 pygsheets 打開匹配的文件
+        gc = pygsheets.authorize(service_file = os.getenv("CREDENTIALS_FILE"))
+        sh = gc.open_by_url("https://docs.google.com/spreadsheets/d/" + file_id + "/edit?usp=sharing")
+        worksheet = sh.worksheet_by_title("APIs")
+
         data = worksheet.get_all_values(include_tailing_empty_rows=False)
         for index, row in enumerate(data):
             if index != 0:  # 跳過第一行
@@ -88,12 +111,16 @@ class DigitalTwins:
                     self.api_table[row[0]] = row[1]
                 else:
                     return None
+
         return self.api_table
 
-    def intent_recognition(self, user_input):
+    def intent_recognition(self, name, user_input):
         result = True
         response = None
-        self.templates_intent = self.templates_intent.format(api_intent = self.api_intent)
+
+        # Get API table
+        api_table = self.load_API_table(name)
+        self.templates_intent = self.templates_intent.format(api_intent = api_table)
         response = self.llm.invoke(self.templates_intent + user_input)
 
         return result, response
@@ -107,19 +134,10 @@ class DigitalTwins:
         for module_name, module in callbacks.items():
             functions.update({name: getattr(module, name) for name in dir(module) if callable(getattr(module, name))})
 
-        # Callback function in self.api_intent
-        api_message = api.content
-
-        try:
-            api_data = json.loads(api_message)
-            api_function_name = next(iter(api_data.values()))
-        except:
-            api_function_name = api.content
-
         # 使用提取的函數名從 functions 字典中獲取函數並執行
-        if api_function_name in functions:
-            result = functions[api_function_name]()
+        if api in functions:
+            result = functions[api]()
         else:
-            print(f"API function {api_function_name} not found in available functions.")
+            print(f"API function {api} not found in available functions.")
 
         return result
