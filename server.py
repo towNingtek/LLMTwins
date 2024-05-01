@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 from database import initDB, selectFromDB, \
     deleteFromDB, listFromDB, \
     insertOrUpdateProfile, insertOrUpdateAPITable
-from models import regUser, getUser, prompt
+from models import regUser, getUser, prompt, callback_api
 from LLM.LLMTwins import DigitalTwins
 
 # Load environment variables from .env file
@@ -89,9 +89,10 @@ async def list_llm_twins():
     return {"result": result}
 
 # Intent recognition
-@app.post("/intent_recognition")
-async def intent_recognition(prompt: prompt):
+@app.post("/prompt")
+async def prompt(prompt: prompt):
     result = False
+    message = ""
 
     # Get user from database
     profile = selectFromDB(conn, "llm_twins", "name", prompt.role)
@@ -105,21 +106,23 @@ async def intent_recognition(prompt: prompt):
     if api_table is None:
         raise HTTPException(status_code = 404, detail = "API table for this user is not registered")
 
+    # Set model from prompt
     dt = DigitalTwins()
-    result, message = dt.intent_recognition(prompt.role, prompt.message)
+    dt.set_model(prompt.model if prompt.model is not None else None)
 
+    result, message = dt.prompt(profile, prompt)
     return {"result": result, "message": message}
 
 @app.post("/callbacks")
-async def callbacks(prompt: prompt):
+async def callbacks(callback_api: callback_api):
     # Get user from database
-    profile = selectFromDB(conn, "llm_twins", "name", prompt.role)
+    profile = selectFromDB(conn, "llm_twins", "name", callback_api.role)
 
     if profile is None:
         raise HTTPException(status_code = 404, detail = "Digital Twin for this user is not registered")
 
     # Run callback function
     dt = DigitalTwins()
-    result = dt.callback(prompt.message)
+    result = dt.callback(callback_api.message)
 
     return {"result": result}

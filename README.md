@@ -54,5 +54,4 @@ Object foo(Object)
 - [Demo APIs on Youtube]((https://youtu.be/VLM60VusPl4))
 
 #### LLM Profile:
-- [Profile on GoogleSheet (Template)](https://docs.google.com/spreadsheets/d/1sIHUNWrziA82znQW9X6zuI9F163pS_XmqzejPyY-gg8/edit?usp=sharing)
-- [Profile on GoogleSheet](https://docs.google.com/spreadsheets/d/10QVQ7MH9GKMDQv6dEr_6qGA3LHYLyXOgWTvM6GKzuK4/edit?usp=sharing)
+- [Profile on GoogleSheet (Template)](https://docs.google.com/spreadsheets/d/1OpWdGNPZSW-782J9zmLW3vT5hIUyQaX2XNotjJB0AD0/edit?usp=sharing)
