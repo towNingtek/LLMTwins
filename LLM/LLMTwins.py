@@ -1,35 +1,62 @@
 import os
 import pygsheets
-import importlib.util
 from langchain_openai import ChatOpenAI
+from langchain.llms import HuggingFaceEndpoint
 from LLM.utils.gdrive import initialize_drive_service, list_files_in_drive_folder
-from LLM.utils.gsheet import write_to_cell, extract_profile_from_sheet
+from LLM.utils.gsheet import write_to_cell
+from LLM.langchain.chains import create_sequential_chain
+from langchain.callbacks.base import BaseCallbackHandler
+from LLM.utils.format import format_html
+from LLM.utils.module_handler import import_modules_from_directory
+from callbacks import *
 
-def import_modules_from_directory(directory):
-    modules = {}
-    for filename in os.listdir(directory):
-        if filename.endswith('.py'):
-            module_name = os.path.splitext(filename)[0]
-            module_path = os.path.join(directory, filename)
-            spec = importlib.util.spec_from_file_location(module_name, module_path)
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-            modules[module_name] = module
-    return modules
+class CallbackHandler(BaseCallbackHandler):
+    def __init__(self, api_table) -> None:
+        super().__init__()
+        self.api_table = api_table
+
+    def process_data(self, input_data, i):
+        # Get if input_data in api_table and get the api name
+        api_name = None
+        if input_data["value"] in self.api_table:
+            api_name = self.api_table[input_data["value"]]
+        else:
+            return input_data["value"]
+
+        # Execute the api callback function
+        callbacks = import_modules_from_directory('callbacks')
+        functions = {}
+        for module_name, module in callbacks.items():
+            functions.update({name: getattr(module, name) for name in dir(module) if callable(getattr(module, name))})
+
+        # Use the extracted function name to retrieve and execute the function from the functions dictionary
+        if api_name in functions:
+            result = functions[api_name](input_data, i)
+            return result
+        else:
+            return input_data
 
 class DigitalTwins:
     def __init__(self):
-        self.llm = ChatOpenAI(model = "gpt-4")
+        self.llm = None
         self.templates_profile = """你是{name}，{description}。"""
         self.api_intent = None
         self.api_table = None
-        self.templates_intent = """請根據用戶的訊息，回傳一個API意圖。注意:
+        self.templates_intent = """請根據用戶的訊息，回傳一個 API 意圖。注意:
         1. 你只能回答在 {api_intent} 中的選項。
         2. 如果你不知道答案，請回答"無法識別"。
+        問題：
         """
 
         self.service = initialize_drive_service(os.getenv("CREDENTIALS_FILE"))
         self.api_table = {}
+
+    def set_model(self, model = None):
+        if (model == None):
+            self.llm = ChatOpenAI(model = "gpt-4", temperature = 0)
+        else:
+            print(f"Model is set to {model}.")
+            self.llm = HuggingFaceEndpoint(repo_id = model, huggingfacehub_api_token = os.getenv("HUGGINGFACEHUB_API_TOKEN"))
 
     # Update_llm_twins function
     def register_llm_twins(self, name, description):
@@ -68,20 +95,22 @@ class DigitalTwins:
 
         return True, {"職稱":name, "描述": description}, self.api_table
 
-    def prompt_llm_twins(self, role, desrtption, prompt, api_table):
-        # 定義 SDGs 的問題
-        self.templates_profile = self.templates_profile.format(name = role, description = desrtption)
-        question = "我想請教您一些問題。" + prompt
+    def prompt(self, profile, prompt):
+        result = True
+        response = None
 
-        # Get intent from api_table
-        self.api_intent = api_table
-        result, str_api = self.intent_recognition(question)
+        if (prompt.type == "llm"):
+            self.templates_profile = self.templates_profile.format(name = profile[0], description = profile[1])
+            result, response = self.invoke(self.llm, self.templates_profile + prompt.message, prompt.format)
+        elif (prompt.type == "intent_recognition"):
+            result, response = self.intent_recognition(profile, prompt.message)
+        elif (prompt.type == "chains"):
+            result, response = self.chains(profile, prompt.injection, prompt.message, prompt.format)
+        elif (prompt.type == "mock"):
+            result = True
+            response = "<div>提升SROI的社會面向，可以從以下幾個方面著手：<br><br>1. 提升受益人的參與度：讓受益人更深入地參與到計畫的設計和實施中，可以提升他們的滿意度和計畫的效果。<br><br>2. 強化與其他組織的合作：與其他組織合作可以提升資源的利用效率，並且可以擴大計畫的影響範圍。<br><br>3. 建立長期的追蹤機制：透過長期追蹤，可以了解計畫的長期效果，並且可以根據追蹤結果調整計畫的設計。<br><br>4. 提升計畫的可持續性：透過提升計畫的可持續性，可以確保計畫的長期效果，並且可以提升計畫的社會影響力。<br><br>近三年與教育議題相關的計畫編號，符合SDG 4的有：<br><br>1. <a href='https://2ndhome.townway.com.tw/content.html?uuid=01916985'>01916985</a><br>2. <a href='https://2ndhome.townway.com.tw/content.html?uuid=45965242'>45965242</a><br>3. <a href='https://2ndhome.townway.com.tw/content.html?uuid=10947662'>10947662</a><br>4. <a href='https://2ndhome.townway.com.tw/content.html?uuid=93673268'>93673268</a><br>5. <a href='https://2ndhome.townway.com.tw/content.html?uuid=00353030'>00353030</a><br>6. <a href='https://2ndhome.townway.com.tw/content.html?uuid=48827084'>48827084</a><br><br>以上就是我根據你提供的網址，列出的近三年與教育議題相關的計畫編號。</div>"
 
-        # 呼叫 callback 函數
-        if (result == False):
-            return False, "無法識別"
-        else:
-            return True, self.callback(str_api)
+        return result, response
 
     def load_API_table(self, name):
         list_llm_name = list_files_in_drive_folder(self.service, os.getenv("GDRIVE_LLM_ROOT_PATH"))
@@ -114,14 +143,43 @@ class DigitalTwins:
 
         return self.api_table
 
-    def intent_recognition(self, name, user_input):
+    def intent_recognition(self, profile, user_input):
         result = True
         response = None
 
         # Get API table
-        api_table = self.load_API_table(name)
+        api_table = self.load_API_table(profile[0])
+
+        response = None
         self.templates_intent = self.templates_intent.format(api_intent = api_table)
-        response = self.llm.invoke(self.templates_intent + user_input)
+        result, response = self.invoke(self.llm, self.templates_intent + user_input)
+
+        return result, response
+
+    def chains(self, profile, injection, user_input, format):
+        result = True
+        response = None
+
+        # Get API table
+        api_table = self.load_API_table(profile[0])
+
+        # Create a template for the API intent
+        self.templates_intent = self.templates_intent.format(api_intent = api_table)
+
+        # Return 403 if not injection
+        if not injection:
+            return False, "Injection is required."
+
+        # Create a profile template
+        self.templates_profile = self.templates_profile.format(name = profile[0], description = profile[1])
+
+        # Create a callback handler
+        callback_handler = CallbackHandler(api_table)
+        response_chain = create_sequential_chain(self.llm, self.templates_profile, callback_handler, injection)
+
+        # Invoke the chain
+        response = None
+        result, response = self.invoke(response_chain, user_input, format)
 
         return result, response
 
@@ -134,10 +192,40 @@ class DigitalTwins:
         for module_name, module in callbacks.items():
             functions.update({name: getattr(module, name) for name in dir(module) if callable(getattr(module, name))})
 
-        # 使用提取的函數名從 functions 字典中獲取函數並執行
+        # Use the extracted function name to retrieve and execute the function from the functions dictionary
         if api in functions:
             result = functions[api]()
         else:
             print(f"API function {api} not found in available functions.")
-
         return result
+
+    def invoke(self, object, user_input, format = None):
+        result = True
+        response = None
+        user_input = user_input + "(請用正(繁)體中文回答我)"
+
+        try:
+            response = object.invoke(user_input)
+        except Exception as e:
+            print(str(e))
+            result = False
+            return result, str(e)
+
+        # Check the type for different objects
+        try:
+            if (type(object).__name__ == "ChatOpenAI"):
+                response = response.content
+            elif (type(object).__name__ == "HuggingFaceEndpoint"):
+                response = response
+            else:
+                # Return the last item in the response if SequentialChain
+                response = list(response.values())[-1]
+        except Exception as e:
+            print(str(e))
+            result = False
+            return result, str(e)
+
+        if (format == "html"):
+            response = format_html(response)
+
+        return result, response
