@@ -61,11 +61,6 @@ async def get_llm_twins(user: getUser):
         # Return 404 response
         raise HTTPException(status_code = 404, detail = "Digital Twin for this user is not registered")
 
-    # TODO
-    # Document loader
-    # Agent
-    # RAG
-
     return {"result": result}
 
 # Get Digital Twins API table
