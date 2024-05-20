@@ -14,6 +14,7 @@ class prompt(BaseModel):
     format: Optional[str] = None
     model: Optional[str] = None
     injection: list = []
+    tools: list = []
     message: str
 
 class callback_api(BaseModel):

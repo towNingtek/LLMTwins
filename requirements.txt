@@ -9,3 +9,10 @@ google-auth-oauthlib
 langchain
 langchain-openai
 huggingface_hub
+wikipedia
+langchain-text-splitters
+faiss-cpu
+bs4
+langchain_community
+google-search-results
+weaviate-client
