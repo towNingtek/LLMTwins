@@ -111,9 +111,6 @@ class DigitalTwins:
             result, response = self.chains(profile, prompt.injection, prompt.message, prompt.format)
         elif (prompt.type == "RAG"):
             result, response = self.rag(self.llm, profile, prompt)
-        elif (prompt.type == "mock"):
-            result = True
-            response = "<div>提升SROI的社會面向，可以從以下幾個方面著手：<br><br>1. 提升受益人的參與度：讓受益人更深入地參與到計畫的設計和實施中，可以提升他們的滿意度和計畫的效果。<br><br>2. 強化與其他組織的合作：與其他組織合作可以提升資源的利用效率，並且可以擴大計畫的影響範圍。<br><br>3. 建立長期的追蹤機制：透過長期追蹤，可以了解計畫的長期效果，並且可以根據追蹤結果調整計畫的設計。<br><br>4. 提升計畫的可持續性：透過提升計畫的可持續性，可以確保計畫的長期效果，並且可以提升計畫的社會影響力。<br><br>近三年與教育議題相關的計畫編號，符合SDG 4的有：<br><br>1. <a href='https://2ndhome.townway.com.tw/content.html?uuid=01916985'>01916985</a><br>2. <a href='https://2ndhome.townway.com.tw/content.html?uuid=45965242'>45965242</a><br>3. <a href='https://2ndhome.townway.com.tw/content.html?uuid=10947662'>10947662</a><br>4. <a href='https://2ndhome.townway.com.tw/content.html?uuid=93673268'>93673268</a><br>5. <a href='https://2ndhome.townway.com.tw/content.html?uuid=00353030'>00353030</a><br>6. <a href='https://2ndhome.townway.com.tw/content.html?uuid=48827084'>48827084</a><br><br>以上就是我根據你提供的網址，列出的近三年與教育議題相關的計畫編號。</div>"
 
         return result, response
 
