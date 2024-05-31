@@ -5,6 +5,7 @@ from langchain.agents import load_tools
 from langchain.agents import initialize_agent
 from langchain.agents import AgentType
 from LLM.utils.module_handler import import_function_from_file, get_functions_from_files
+from LLM.utils.format import format_html
 
 class Agent():
     def __init__(self, llm):
@@ -51,7 +52,13 @@ class Agent():
 
         try:
             result = agent.invoke({"input": prompt.message + "請用正體中文 (zh-TW) 回答。"})
-            return result["output"]
+
+            if prompt.format and prompt.format == "html":
+                response =  format_html(result["output"])
+
+                return response
+            else:
+                return result["output"]
         except Exception as e:
             print("Error:", str(e))
             return str(e)
