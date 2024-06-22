@@ -18,10 +18,16 @@ class Agent():
     
     def load_rag_tools(self, prompt):
         obj_params = prompt.json()
+        functions_dict = {}
 
         list_arg_tools = []
         directory = os.getenv("PATH_RAG_TOOLS")
-        functions_dict = get_functions_from_files(directory)
+
+        try:
+            functions_dict = get_functions_from_files(directory + prompt.role + "/")
+        except Exception as e:
+            functions_dict = get_functions_from_files(directory + "/")
+            pass
 
         for file_path, functions in functions_dict.items():
             for function_name in functions:
