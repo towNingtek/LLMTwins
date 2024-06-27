@@ -63,6 +63,10 @@ class Agent():
                 postifx_prompt = "請使用 HTML 格式，並將回答包含在一個 <div>標籤中。"
 
             result = agent.invoke({"input": prompt.message + postifx_prompt + "請用正體中文 (zh-TW) 回答。"})
+            if "Agent stopped due to iteration limit or time limit" in result["output"]:
+                response = self.llm.invoke(prompt.message + postifx_prompt + "請用正體中文 (zh-TW) 回答。")
+                return response
+
             if prompt.format and prompt.format == "html":
                 html_content = re.search(r"```html(.*?)```", result["output"], re.DOTALL)
                 if html_content:
