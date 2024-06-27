@@ -56,7 +56,7 @@ class DigitalTwins:
 
     def set_model(self, model = None):
         if (model == None):
-            self.llm = ChatOpenAI(model = "gpt-4", temperature = 0)
+            self.llm = ChatOpenAI(model = "gpt-4o", temperature = 0)
         else:
             print(f"Model is set to {model}.")
             self.llm = HuggingFaceEndpoint(repo_id = model, huggingfacehub_api_token = os.getenv("HUGGINGFACEHUB_API_TOKEN"))
