@@ -1,3 +1,4 @@
+import re
 import os
 import json
 from langchain_core.tools import Tool
@@ -50,10 +51,10 @@ class Agent():
         agent = initialize_agent(
             tools + list_rag_tools,
             self.llm,
-            agent = AgentType.ZERO_SHOT_REACT_DESCRIPTION,
-            handle_parsing_errors = True,
-            max_execution_time = 30,
-            verbose = False
+            agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
+            handle_parsing_errors=True,
+            max_execution_time=30,
+            verbose=False
         )
 
         try:
@@ -62,10 +63,12 @@ class Agent():
                 postifx_prompt = "請使用 HTML 格式，並將回答包含在一個 <div>標籤中。"
 
             result = agent.invoke({"input": prompt.message + postifx_prompt + "請用正體中文 (zh-TW) 回答。"})
-
             if prompt.format and prompt.format == "html":
-                response =  format_html(result["output"])
-
+                html_content = re.search(r"```html(.*?)```", result["output"], re.DOTALL)
+                if html_content:
+                    response = format_html(html_content.group(1).strip())
+                else:
+                    response = format_html(result["output"].strip())
                 return response
             else:
                 return result["output"]
