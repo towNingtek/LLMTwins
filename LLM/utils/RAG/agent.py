@@ -57,7 +57,11 @@ class Agent():
         )
 
         try:
-            result = agent.invoke({"input": prompt.message + "請用正體中文 (zh-TW) 回答。"})
+            postifx_prompt = ""
+            if prompt.format and prompt.format == "html":
+                postifx_prompt = "請使用 HTML 格式，並將回答包含在一個 <div>標籤中。"
+
+            result = agent.invoke({"input": prompt.message + postifx_prompt + "請用正體中文 (zh-TW) 回答。"})
 
             if prompt.format and prompt.format == "html":
                 response =  format_html(result["output"])
