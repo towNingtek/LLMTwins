@@ -1,3 +1,4 @@
+import re
 import os
 import json
 from langchain_core.tools import Tool
@@ -18,10 +19,16 @@ class Agent():
     
     def load_rag_tools(self, prompt):
         obj_params = prompt.json()
+        functions_dict = {}
 
         list_arg_tools = []
         directory = os.getenv("PATH_RAG_TOOLS")
-        functions_dict = get_functions_from_files(directory)
+
+        try:
+            functions_dict = get_functions_from_files(directory + prompt.role + "/")
+        except Exception as e:
+            functions_dict = get_functions_from_files(directory + "/")
+            pass
 
         for file_path, functions in functions_dict.items():
             for function_name in functions:
@@ -44,18 +51,28 @@ class Agent():
         agent = initialize_agent(
             tools + list_rag_tools,
             self.llm,
-            agent = AgentType.ZERO_SHOT_REACT_DESCRIPTION,
-            handle_parsing_errors = True,
-            max_execution_time = 30,
-            verbose = False
+            agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
+            handle_parsing_errors=True,
+            max_execution_time=30,
+            verbose=False
         )
 
         try:
-            result = agent.invoke({"input": prompt.message + "請用正體中文 (zh-TW) 回答。"})
+            postifx_prompt = ""
+            if prompt.format and prompt.format == "html":
+                postifx_prompt = "請使用 HTML 格式，並將回答包含在一個 <div>標籤中。"
+
+            result = agent.invoke({"input": prompt.message + postifx_prompt + "請用正體中文 (zh-TW) 回答。"})
+            if "Agent stopped due to iteration limit or time limit" in result["output"]:
+                response = self.llm.invoke(prompt.message + postifx_prompt + "請用正體中文 (zh-TW) 回答。")
+                return response
 
             if prompt.format and prompt.format == "html":
-                response =  format_html(result["output"])
-
+                html_content = re.search(r"```html(.*?)```", result["output"], re.DOTALL)
+                if html_content:
+                    response = format_html(html_content.group(1).strip())
+                else:
+                    response = format_html(result["output"].strip())
                 return response
             else:
                 return result["output"]
