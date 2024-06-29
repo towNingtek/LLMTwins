@@ -1,18 +1,17 @@
 python-dotenv
 pygsheets
-python-dotenv
 fastapi
 uvicorn
 google-api-python-client
 google-auth-httplib2
 google-auth-oauthlib
-langchain
-langchain-openai
+langchain==0.1.9
+langchain-openai==0.0.7
 huggingface_hub
 wikipedia
-langchain-text-splitters
+langchain-text-splitters==0.0.2
 faiss-cpu
-bs4
-langchain_community
+beautifulsoup4  # bs4 的完整名稱是 beautifulsoup4
+langchain-community==0.0.22
 google-search-results
 weaviate-client
