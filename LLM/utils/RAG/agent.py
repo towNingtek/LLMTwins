@@ -2,20 +2,15 @@ import re
 import os
 import json
 from langchain_core.tools import Tool
-from langchain.agents import load_tools
-from langchain.agents import initialize_agent
-from langchain.agents import AgentType
+from langchain_community.agent_toolkits.load_tools import load_tools
+from langchain.agents import AgentExecutor, create_react_agent
 from LLM.utils.module_handler import import_function_from_file, get_functions_from_files
 from LLM.utils.format import format_html
+from langchain import hub
 
 class Agent():
     def __init__(self, llm):
         self.llm = llm
-
-    def serpapi(self, message):
-        tools = load_tools(["serpapi"], llm=self.llm)
-        agent = initialize_agent(tools, self.llm, agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION, verbose=False)
-        return agent.invoke(message)
     
     def load_rag_tools(self, prompt):
         obj_params = prompt.json()
@@ -24,11 +19,7 @@ class Agent():
         list_arg_tools = []
         directory = os.getenv("PATH_RAG_TOOLS")
 
-        try:
-            functions_dict = get_functions_from_files(directory + prompt.role + "/")
-        except Exception as e:
-            functions_dict = get_functions_from_files(directory + "/")
-            pass
+        functions_dict = get_functions_from_files(directory + "/")
 
         for file_path, functions in functions_dict.items():
             for function_name in functions:
@@ -47,26 +38,32 @@ class Agent():
     def custom(self, profile, prompt):
         list_rag_tools = self.load_rag_tools(prompt)
         tools = load_tools([], llm=self.llm)
+        agent = None
+        prompt_ = hub.pull("hwchase17/react")
 
-        agent = initialize_agent(
-            tools + list_rag_tools,
-            self.llm,
-            agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
-            handle_parsing_errors=True,
-            max_execution_time=30,
-            verbose=False
-        )
+        try:
+            agent = create_react_agent(
+                self.llm,
+                tools + list_rag_tools,
+                prompt=prompt_,
+            )
+            # Execute your prompt or other logic here
+        except Exception as e:
+            # Handle the error accordingly
+            print(f"An error occurred: {e}")
+
+        agent_executor = AgentExecutor(agent=agent, tools=tools + list_rag_tools)
 
         try:
             postifx_prompt = ""
             if prompt.format and prompt.format == "html":
                 postifx_prompt = "請使用 HTML 格式，並將回答包含在一個 <div>標籤中。"
 
-            result = agent.invoke({"input": prompt.message + postifx_prompt + "請用正體中文 (zh-TW) 回答。"})
+            result = agent_executor.invoke({"input": prompt.message + postifx_prompt + "請用正體中文 (zh-TW) 回答。"})
             if "Agent stopped due to iteration limit or time limit" in result["output"]:
                 response = self.llm.invoke(prompt.message + postifx_prompt + "請用正體中文 (zh-TW) 回答。")
                 return response
-
+            
             if prompt.format and prompt.format == "html":
                 html_content = re.search(r"```html(.*?)```", result["output"], re.DOTALL)
                 if html_content:
