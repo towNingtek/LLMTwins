@@ -1,36 +1,8 @@
 import os
 from langchain_openai import ChatOpenAI
 from langchain_community.llms import HuggingFaceEndpoint
-from langchain.callbacks.base import BaseCallbackHandler
 from LLM.utils.format import format_html
-from LLM.utils.module_handler import import_modules_from_directory
 from LLM.utils.RAG.agent import Agent
-
-class CallbackHandler(BaseCallbackHandler):
-    def __init__(self, api_table) -> None:
-        super().__init__()
-        self.api_table = api_table
-
-    def process_data(self, input_data, i):
-        # Get if input_data in api_table and get the api name
-        api_name = None
-        if input_data["value"] in self.api_table:
-            api_name = self.api_table[input_data["value"]]
-        else:
-            return input_data["value"]
-
-        # Execute the api callback function
-        callbacks = import_modules_from_directory('callbacks')
-        functions = {}
-        for module_name, module in callbacks.items():
-            functions.update({name: getattr(module, name) for name in dir(module) if callable(getattr(module, name))})
-
-        # Use the extracted function name to retrieve and execute the function from the functions dictionary
-        if api_name in functions:
-            result = functions[api_name](input_data, i)
-            return result
-        else:
-            return input_data
 
 class DigitalTwins:
     def __init__(self):
