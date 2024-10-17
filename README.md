@@ -22,8 +22,8 @@ Whether you're looking to enhance operational efficiency, optimize product devel
 
 ## Installation
 ```bash=
-vitrualenv env
-source env/bin/activate
+python3.10 -m venv env
+source env/bin/active
 pip3 install -r requirements.txt
 ```
 
