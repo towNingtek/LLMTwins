@@ -2,7 +2,7 @@ import os
 import ast
 import pygsheets
 from langchain_openai import ChatOpenAI
-from langchain.llms import HuggingFaceEndpoint
+from langchain_community.llms import HuggingFaceEndpoint
 from LLM.utils.gdrive import initialize_drive_service, list_files_in_drive_folder
 from LLM.utils.gsheet import write_to_cell
 from LLM.langchain.chains import create_sequential_chain
