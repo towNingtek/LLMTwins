@@ -22,13 +22,13 @@ Whether you're looking to enhance operational efficiency, optimize product devel
 
 ## Installation
 ```bash=
-vitrualenv env
+python3.10 -m venv env
+source env/bin/active
 pip3 install -r requirements.txt
 ```
 
 ## Run
 ```bash=
-source env/bin/activate
 uvicorn server:app --host 0.0.0.0 --port 8000 --reload
 ```
 
