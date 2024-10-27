@@ -53,7 +53,7 @@ class Agent():
             self.llm,
             agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
             handle_parsing_errors=True,
-            max_execution_time=30,
+            max_execution_time=90,
             verbose=False
         )
 
