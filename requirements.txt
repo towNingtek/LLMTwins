@@ -1,20 +1,11 @@
+phidata
 python-dotenv
 pygsheets
 fastapi
 uvicorn
+openai
 google-api-python-client
 google-auth-httplib2
 google-auth-oauthlib
-langchain==0.1.9
-langchain-openai==0.0.7
-huggingface_hub
-wikipedia
-langchain-text-splitters==0.0.2
-faiss-cpu
-beautifulsoup4  # bs4 的完整名稱是 beautifulsoup4
-langchain-community==0.0.22
-google-search-results
-weaviate-client
-
 gspread
 langgraph

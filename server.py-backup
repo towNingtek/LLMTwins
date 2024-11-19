@@ -1,0 +1,130 @@
+from typing import Iterator, ClassVar
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from dotenv import load_dotenv
+from phi.workflow import Workflow, RunResponse
+from phi.agent import Agent
+from phi.model.openai import OpenAIChat
+from models import prompt
+import json
+import agents.小鎮賦能.query_projects
+
+load_dotenv()
+app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+class TownEmpower(Workflow):
+    edu_agent: ClassVar[Agent] = Agent(
+        name="Education Agent",
+        role="查詢教育相關計畫",
+        model=OpenAIChat(id="gpt-4o"),
+        tools=[agents.小鎮賦能.query_projects.get_edu_dataframe],
+    )
+
+    ocean_agent: ClassVar[Agent] = Agent(
+        name="Ocean Agent",
+        role="查詢海洋相關計畫",
+        model=OpenAIChat(id="gpt-4o"),
+        tools=[agents.小鎮賦能.query_projects.get_ocean_dataframe],
+    )
+
+    tour_agent: ClassVar[Agent] = Agent(
+        name="Tour Agent",
+        role="查詢遊程相關計畫",
+        model=OpenAIChat(id="gpt-4o"),
+        tools=[agents.小鎮賦能.query_projects.get_tour_dataframe],
+    )
+
+    def run(self, category: str, weight: list) -> Iterator[RunResponse]:
+        params = json.dumps({"weight": weight})
+        agents = {
+            "edu": self.edu_agent,
+            "ocean": self.ocean_agent,
+            "tour": self.tour_agent
+        }
+        yield from agents[category].run(f"使用參數 str_obj={params}", stream=True)
+
+@app.get("/health")
+async def health():
+    return {"result": "Healthy Server!"}
+
+AGENT_MAPPING = {
+   "小鎮賦能": "edu"  # "edu"代表教育相關查詢
+}
+
+class TownEmpower(Workflow):
+    edu_agent: ClassVar[Agent] = Agent(
+        name="Education Agent",
+        role="查詢教育相關計畫",
+        model=OpenAIChat(id="gpt-4o"),
+        tools=[agents.小鎮賦能.query_projects.get_edu_dataframe],
+    )
+
+    ocean_agent: ClassVar[Agent] = Agent(
+        name="Ocean Agent",
+        role="查詢海洋相關計畫",
+        model=OpenAIChat(id="gpt-4o"),
+        tools=[agents.小鎮賦能.query_projects.get_ocean_dataframe],
+    )
+
+    tour_agent: ClassVar[Agent] = Agent(
+        name="Tour Agent",
+        role="查詢遊程相關計畫",
+        model=OpenAIChat(id="gpt-4o"),
+        tools=[agents.小鎮賦能.query_projects.get_tour_dataframe],
+    )
+
+    selector_agent: ClassVar[Agent] = Agent(
+        name="Selector",
+        role="選擇合適的查詢 agent",
+        model=OpenAIChat(id="gpt-4o"),
+        add_history_to_messages=True,
+        num_history_responses=3,
+        instructions=["根據用戶需求選擇合適的查詢 agent。教育相關選 edu，海洋相關選 ocean，遊程相關選 tour"]
+    )
+
+    def run(self, message: str, weight: list) -> Iterator[RunResponse]:
+        agents = {
+            "edu": self.edu_agent,
+            "ocean": self.ocean_agent,
+            "tour": self.tour_agent
+        }
+
+        # 設定 selector 的回應格式
+        selector_response = self.selector_agent.run(
+            f"""
+            分析以下訊息並回傳單一字串(edu/ocean/tour): {message}
+            - 教育相關回傳 edu
+            - 海洋相關回傳 ocean
+            - 遊程相關回傳 tour
+            """
+        )
+
+        # 執行選中的 agent
+        params = json.dumps({"weight": weight})
+        selected_agent = agents[selector_response.content.strip()]
+        yield from selected_agent.run(f"使用參數 str_obj={params}", stream=True)
+
+@app.post("/prompt")
+async def prompt(prompt: prompt):
+    workflow = TownEmpower(session_id="town-empower")
+    response = workflow.run(
+        message=prompt.message,
+        weight=["07", "12"]
+    )
+
+    for run_response in response:
+        if run_response.content:
+            return {"result": True, "message": run_response.content}
+        for message in run_response.messages:
+            if message.role == "tool":
+                return {"result": True, "message": message.content}
+
+    return {"result": False, "message": "No result found"}
