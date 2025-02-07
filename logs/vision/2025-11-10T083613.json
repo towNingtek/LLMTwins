@@ -1,0 +1,26 @@
+{
+  "timestamp": "2025-11-10T08:36:13.570169",
+  "gpt_labels": [],
+  "mapped_features": {
+    "style": null,
+    "structure": null,
+    "roof": null,
+    "function": null,
+    "material": null,
+    "raw_labels": []
+  },
+  "scores": [],
+  "best_location": {
+    "name": "無法識別地點",
+    "summary": "尚無足夠資訊與任何已知地點相符。",
+    "score": 0,
+    "scores_detail": [],
+    "weights": {
+      "style": 1,
+      "structure": 1,
+      "roof": 1,
+      "function": 2,
+      "material": 1
+    }
+  }
+}

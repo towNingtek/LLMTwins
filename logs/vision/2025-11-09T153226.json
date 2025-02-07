@@ -1,0 +1,38 @@
+{
+  "timestamp": "2025-11-09T15:32:26.385524",
+  "gpt_labels": [
+    "日治時期",
+    "戰後歷史",
+    "機械設施",
+    "遺址",
+    "虎尾鎮"
+  ],
+  "mapped_features": {
+    "style": null,
+    "structure": null,
+    "roof": null,
+    "function": null,
+    "material": "金屬機械構件",
+    "raw_labels": [
+      "日治時期",
+      "戰後歷史",
+      "機械設施",
+      "遺址",
+      "虎尾鎮"
+    ]
+  },
+  "scores": [],
+  "best_location": {
+    "name": "無法識別地點",
+    "summary": "尚無足夠資訊與任何已知地點相符。",
+    "score": 0,
+    "scores_detail": [],
+    "weights": {
+      "style": 1,
+      "structure": 1,
+      "roof": 1,
+      "function": 2,
+      "material": 1
+    }
+  }
+}

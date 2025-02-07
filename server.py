@@ -5,6 +5,22 @@ from pydantic import BaseModel
 from typing import Dict, Any, Optional
 from contextvars import ContextVar
 import os
+import logging
+
+# 自動建立 logs 資料夾
+os.makedirs("logs", exist_ok=True)
+
+# 設定 logger
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        logging.FileHandler("logs/app.log", encoding="utf-8"),
+        logging.StreamHandler()
+    ]
+)
+
+logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
@@ -31,6 +47,9 @@ class Prompt(BaseModel):
     message: str
     params: Optional[Dict[str, Any]] = {}
 
+from utils.report_routes import router as report_router
+app.include_router(report_router)
+
 @app.get("/health")
 async def health():
     return {"status": "healthy"}
@@ -40,7 +59,6 @@ async def handle_prompt(prompt: Prompt):
     try:
         # 將請求存儲在上下文中
         token = current_request.set(prompt)
-        
         try:
             # 獲取對應的 agent
             if prompt.role not in loaded_agents:
@@ -70,12 +88,14 @@ async def handle_prompt(prompt: Prompt):
             if content is None:
                 raise HTTPException(status_code=500, detail="No response from agent")
 
-            from utils.format import format_html
-            formatted_content = format_html(content.strip())
+            needs_html = prompt.params.get("format") == "html" if prompt.params else False
+            if needs_html:
+                from utils.format import format_html
+                content = format_html(content.strip())
                 
             return {
                 "result": True,
-                "message": formatted_content
+                "message": content
             }
             
         finally:

@@ -1,0 +1,277 @@
+{
+  "timestamp": "2025-11-09T10:56:14.744352",
+  "gpt_labels": [
+    "日治建築",
+    "木造結構",
+    "和式屋頂",
+    "歷史遺址",
+    "虎尾鎮"
+  ],
+  "mapped_features": {
+    "style": null,
+    "structure": "木造",
+    "roof": null,
+    "function": null,
+    "material": "木材",
+    "raw_labels": [
+      "日治建築",
+      "木造結構",
+      "和式屋頂",
+      "歷史遺址",
+      "虎尾鎮"
+    ]
+  },
+  "scores": [
+    {
+      "name": "雲林虎尾「布袋戲館」",
+      "score": 0,
+      "formula": ""
+    },
+    {
+      "name": "道禾六藝文化館（原台中刑務所演武場）",
+      "score": 0,
+      "formula": ""
+    },
+    {
+      "name": "虎尾雲林故事館",
+      "score": 0,
+      "formula": ""
+    },
+    {
+      "name": "北港朝天宮",
+      "score": 0,
+      "formula": ""
+    },
+    {
+      "name": "守車",
+      "score": 0,
+      "formula": ""
+    },
+    {
+      "name": "台糖鐵路",
+      "score": 0,
+      "formula": ""
+    },
+    {
+      "name": "台糖糖蜜車展示（虎尾糖廠）",
+      "score": 0,
+      "formula": ""
+    },
+    {
+      "name": "台鐵15C8000型篷車",
+      "score": 0,
+      "formula": ""
+    },
+    {
+      "name": "虎尾糖廠前",
+      "score": 0,
+      "formula": ""
+    },
+    {
+      "name": "虎尾雕塑後",
+      "score": 0,
+      "formula": ""
+    },
+    {
+      "name": "第二單身宿舍",
+      "score": 0,
+      "formula": ""
+    },
+    {
+      "name": "虎尾溪的鐵橋我",
+      "score": 0,
+      "formula": ""
+    },
+    {
+      "name": "虎尾溪鐵橋＿尚勳",
+      "score": 0,
+      "formula": ""
+    },
+    {
+      "name": "虎尾溪鐵橋-H",
+      "score": 0,
+      "formula": ""
+    },
+    {
+      "name": "虎尾溪鐵橋-Xu",
+      "score": 0,
+      "formula": ""
+    },
+    {
+      "name": "虎尾溪鐵橋-華",
+      "score": 0,
+      "formula": ""
+    },
+    {
+      "name": "虎尾溪鐵橋-Yi",
+      "score": 0,
+      "formula": ""
+    },
+    {
+      "name": "虎尾溪鐵橋-玄",
+      "score": 0,
+      "formula": ""
+    },
+    {
+      "name": "雲林布袋戲館",
+      "score": 1,
+      "formula": "material:1"
+    },
+    {
+      "name": "虎尾糖廠",
+      "score": 0,
+      "formula": ""
+    },
+    {
+      "name": "虎尾驛",
+      "score": 2,
+      "formula": "structure:1 + material:1"
+    },
+    {
+      "name": "天后宮",
+      "score": 0,
+      "formula": ""
+    }
+  ],
+  "best_location": {
+    "name": "虎尾驛",
+    "style": "近代日式建築,和洋折衷風格",
+    "structure": "木造,水泥基座,木門,木窗",
+    "roof": "",
+    "function": "火車站,驛站",
+    "material": "木材,屋瓦,洗石子,玻璃,鐵材",
+    "summary": "虎尾驛，原名「五間厝驛」，為第二代車站是虎尾糖廠與客運車站的結合，標誌著虎尾因糖業而興盛的起點，曾是日治時期的市中心。如今，虎尾驛成為全國僅存的運蔗五分車景點，見證了製糖業的輝煌歷史。\n在虎尾驛內的「蔗香甜」蛋捲店，使用台糖生產的三溫糖製作蛋捲，成為店內經典暢銷商品，其香氣令人難以抗拒，是虎尾小旅行不可錯過的獨家紀念品。",
+    "interview": [
+      {
+        "speaker": "虎科大老師",
+        "content": "虎尾第二車站，日式昭和建築，上木下磚兩潑水，現為老人活動中心，",
+        "topics": []
+      },
+      {
+        "speaker": "虎科大老師",
+        "content": "虎尾第二車站，日式昭和建築，上木下磚兩潑水，現為老人活動中心，",
+        "topics": []
+      }
+    ],
+    "score": 2,
+    "scores_detail": [
+      {
+        "name": "雲林虎尾「布袋戲館」",
+        "score": 0,
+        "formula": ""
+      },
+      {
+        "name": "道禾六藝文化館（原台中刑務所演武場）",
+        "score": 0,
+        "formula": ""
+      },
+      {
+        "name": "虎尾雲林故事館",
+        "score": 0,
+        "formula": ""
+      },
+      {
+        "name": "北港朝天宮",
+        "score": 0,
+        "formula": ""
+      },
+      {
+        "name": "守車",
+        "score": 0,
+        "formula": ""
+      },
+      {
+        "name": "台糖鐵路",
+        "score": 0,
+        "formula": ""
+      },
+      {
+        "name": "台糖糖蜜車展示（虎尾糖廠）",
+        "score": 0,
+        "formula": ""
+      },
+      {
+        "name": "台鐵15C8000型篷車",
+        "score": 0,
+        "formula": ""
+      },
+      {
+        "name": "虎尾糖廠前",
+        "score": 0,
+        "formula": ""
+      },
+      {
+        "name": "虎尾雕塑後",
+        "score": 0,
+        "formula": ""
+      },
+      {
+        "name": "第二單身宿舍",
+        "score": 0,
+        "formula": ""
+      },
+      {
+        "name": "虎尾溪的鐵橋我",
+        "score": 0,
+        "formula": ""
+      },
+      {
+        "name": "虎尾溪鐵橋＿尚勳",
+        "score": 0,
+        "formula": ""
+      },
+      {
+        "name": "虎尾溪鐵橋-H",
+        "score": 0,
+        "formula": ""
+      },
+      {
+        "name": "虎尾溪鐵橋-Xu",
+        "score": 0,
+        "formula": ""
+      },
+      {
+        "name": "虎尾溪鐵橋-華",
+        "score": 0,
+        "formula": ""
+      },
+      {
+        "name": "虎尾溪鐵橋-Yi",
+        "score": 0,
+        "formula": ""
+      },
+      {
+        "name": "虎尾溪鐵橋-玄",
+        "score": 0,
+        "formula": ""
+      },
+      {
+        "name": "雲林布袋戲館",
+        "score": 1,
+        "formula": "material:1"
+      },
+      {
+        "name": "虎尾糖廠",
+        "score": 0,
+        "formula": ""
+      },
+      {
+        "name": "虎尾驛",
+        "score": 2,
+        "formula": "structure:1 + material:1"
+      },
+      {
+        "name": "天后宮",
+        "score": 0,
+        "formula": ""
+      }
+    ],
+    "weights": {
+      "style": 1,
+      "structure": 1,
+      "roof": 1,
+      "function": 2,
+      "material": 1
+    }
+  }
+}
