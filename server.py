@@ -70,12 +70,14 @@ async def handle_prompt(prompt: Prompt):
             if content is None:
                 raise HTTPException(status_code=500, detail="No response from agent")
 
-            from utils.format import format_html
-            formatted_content = format_html(content.strip())
+            needs_html = prompt.params.get("format") == "html" if prompt.params else False
+            if needs_html:
+                from utils.format import format_html
+                content = format_html(content.strip())
                 
             return {
                 "result": True,
-                "message": formatted_content
+                "message": content
             }
             
         finally:
