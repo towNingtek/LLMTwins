@@ -18,3 +18,4 @@ weaviate-client
 
 gspread
 langgraph
+aiohttp

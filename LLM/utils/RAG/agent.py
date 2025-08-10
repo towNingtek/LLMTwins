@@ -162,8 +162,8 @@ class Agent():
             self.llm,
             agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
             handle_parsing_errors=True,
-            max_execution_time=90,
-            verbose=True  # 開啟 verbose 以查看 agent 執行過程
+            max_execution_time=30,
+            verbose=False  # 開啟 verbose 以查看 agent 執行過程
         )
 
         try:
