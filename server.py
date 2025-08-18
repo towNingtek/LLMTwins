@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
 from policy.guard import DenyGuard
+from fastapi import UploadFile, File
 
 # ============================================================================
 # Configuration & Initialization
@@ -594,3 +595,55 @@ async def create_session():
     # Optionally initialize empty files for future modules
     # (d / "parsed.json").write_text("{}", encoding="utf-8")
     return {"session_id": sid}
+
+from fastapi import UploadFile, File  # 確保有這行
+
+@app.post("/api/sessions/{session_id}/upload")
+async def upload_to_session(session_id: str, file: UploadFile = File(...)):
+    """
+    Upload a file into a session. The file will be stored under sessions/<sid>/raw/.
+    Returns simple metadata for frontend display.
+    """
+    d = _session_dir(session_id)
+    raw_dir = d / "raw"
+    _ensure_dir(raw_dir)
+
+    orig_name = (file.filename or "upload.bin")
+    orig_name = Path(orig_name).name
+    suffix = Path(orig_name).suffix.lower()
+
+    ts = int(time.time() * 1000)
+    dest_name = f"{ts}_{uuid.uuid4().hex}{suffix}"
+    dest_path = raw_dir / dest_name
+
+    size = 0
+    try:
+        with dest_path.open("wb") as out:
+            while True:
+                chunk = await file.read(1024 * 1024)  # 1MB
+                if not chunk:
+                    break
+                size += len(chunk)
+                out.write(chunk)
+    finally:
+        # starlette UploadFile has async .close(), not .aclose()
+        try:
+            await file.close()
+        except Exception:
+            pass
+
+    # 可選：把上傳事件寫進 chat_history
+    try:
+        _append_history(session_id, "system", f"[upload] {orig_name} -> raw/{dest_name} ({size} bytes)")
+    except Exception:
+        pass
+
+    return {
+        "ok": True,
+        "session_id": session_id,
+        "name": orig_name,
+        "stored_as": dest_name,
+        "size": size,
+        "mime": file.content_type,
+        "path": str(dest_path.relative_to(SESS_BASE)),
+    }
