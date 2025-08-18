@@ -11,13 +11,6 @@ from fastapi.responses import JSONResponse, StreamingResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
-# Local imports
-from database import (
-    initDB, selectFromDB, deleteFromDB, listFromDB,
-    insertOrUpdateProfile, insertOrUpdateAPITable
-)
-from models import regUser, getUser, prompt, callback_api
-from LLM.LLMTwins import DigitalTwins
 from policy.guard import DenyGuard
 
 # ============================================================================
@@ -46,18 +39,16 @@ ALLOWED_ORIGINS = [
     "https://eva.4impact.cc",
     "http://localhost:3000",
     "http://localhost:5173",
+    "http://nsdgs.4impact.cc",
 ]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Consider using ALLOWED_ORIGINS for production
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Initialize database
-conn, cursor = initDB()
 
 # ============================================================================
 # Startup Events & Policy Loading
@@ -140,127 +131,8 @@ async def admin_policy_reload():
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 # ============================================================================
-# Digital Twins Management Endpoints
-# ============================================================================
-
-@app.post("/register_llm_twins")
-async def register_llm_twins(user: regUser):
-    """Register or update LLM digital twins"""
-    # Check if user is already registered
-    result = selectFromDB(conn, "llm_twins", "name", user.name)
-
-    # Register or update digital twins
-    dt = DigitalTwins()
-    result, profile, api_table = dt.register_llm_twins(user.name, user.description)
-
-    # Insert or update profile
-    if result:
-        result = insertOrUpdateProfile(conn, "llm_twins", "name", user.name, profile)
-
-    # Insert or update API table
-    if result:
-        result = insertOrUpdateAPITable(conn, "llm_twins_api", "name", user.name, api_table)
-
-    # Return Profile & API Table
-    profile["api_table"] = api_table
-    return profile
-
-@app.post("/get_llm_twins")
-async def get_llm_twins(user: getUser):
-    """Get LLM digital twins by user name"""
-    result = selectFromDB(conn, "llm_twins", "name", user.name)
-    
-    if result is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Digital Twin for this user is not registered"
-        )
-    
-    return {"result": result}
-
-@app.post("/get_llm_twins_api")
-async def get_llm_twins_api(user: getUser):
-    """Get digital twins API table"""
-    result = selectFromDB(conn, "llm_twins_api", "name", user.name)
-    
-    if result is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Digital Twin for this user is not registered"
-        )
-    
-    return {"result": json.loads(result[1])}
-
-@app.post("/delete_llm_twins")
-async def delete_llm_twins(user: getUser):
-    """Delete LLM digital twins by user name"""
-    result = deleteFromDB(conn, "llm_twins", "name", user.name)
-    
-    if not result:
-        raise HTTPException(
-            status_code=404,
-            detail="Digital Twin for this user is not registered"
-        )
-    
-    return {"message": "Digital Twin for this user has been deleted"}
-
-@app.get("/list_llm_twins")
-async def list_llm_twins():
-    """List all LLM digital twins"""
-    result = listFromDB(conn, "llm_twins")
-    return {"result": result}
-
-# ============================================================================
-# LLM Processing Endpoints
-# ============================================================================
-
-@app.post("/prompt")
-async def handle_prompt(prompt_data: prompt):
-    """Handle prompt processing with intent recognition"""
-    # Get user profile from database
-    profile = selectFromDB(conn, "llm_twins", "name", prompt_data.role)
-    if profile is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Digital Twin for this user is not registered"
-        )
-
-    # Get API table from database
-    api_table = selectFromDB(conn, "llm_twins_api", "name", prompt_data.role)
-    if api_table is None:
-        raise HTTPException(
-            status_code=404,
-            detail="API table for this user is not registered"
-        )
-
-    # Process prompt
-    dt = DigitalTwins()
-    dt.set_model(prompt_data.model if prompt_data.model is not None else None)
-    result, message = dt.prompt(profile, prompt_data)
-    
-    return {"result": result, "message": message}
-
-@app.post("/callbacks")
-async def handle_callbacks(callback_data: callback_api):
-    """Handle callback API requests"""
-    # Get user profile from database
-    profile = selectFromDB(conn, "llm_twins", "name", callback_data.role)
-    if profile is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Digital Twin for this user is not registered"
-        )
-
-    # Run callback function
-    dt = DigitalTwins()
-    result = dt.callback(callback_data.message)
-    
-    return {"result": result}
-
-# ============================================================================
 # Ollama Proxy Endpoints
 # ============================================================================
-
 async def _fake_stream_from_full(payload_bytes: bytes):
     """Fallback: Get full response and convert to streaming format"""
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=90)) as session:
