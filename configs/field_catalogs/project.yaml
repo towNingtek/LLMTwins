@@ -1,0 +1,139 @@
+model: Project
+confidence:
+  weights: { llm: 0.5, rag: 0.3, validator: 0.2 }
+  thresholds: { required: 0.75, optional: 0.6 }
+
+fields:
+  title:
+    required: true
+    type: str
+    min_len: 5
+    max_len: 120
+    cms_key: name
+    from:
+      - llm.extract: "Project Title (avoid '草案')"
+    normalize: trim_spaces
+
+  summary:
+    required: true
+    type: str
+    min_len: 80
+    max_len: 2000
+    cms_key: philosophy
+    from:
+      - llm.summarize: "3-5 sentences: aims/beneficiaries/methods/outcomes"
+    normalize: squeeze_spaces
+
+  start_date:
+    required: true
+    type: date
+    format: "%Y-%m-%d"
+    cms_key: project_start_date
+    from:
+      - llm.extract: "Start Date (YYYY-MM-DD; support 民國年)"
+    normalize: [to_iso_date, date_roc_to_iso]
+
+  end_date:
+    required: true
+    type: date
+    format: "%Y-%m-%d"
+    cms_key: project_due_date
+    from:
+      - llm.extract: "End Date (YYYY-MM-DD; end > start)"
+    cross_field_rules:
+      - must_be_after: start_date
+    normalize: [to_iso_date, date_roc_to_iso]
+
+  total_budget_twd:
+    required: false
+    type: number
+    min: 0
+    cms_key: budget
+    from:
+      - llm.extract: "Total Budget (TWD; number only)"
+    normalize: currency_to_number
+
+  owner_department:
+    required: false
+    type: str
+    cms_key: org
+    from:
+      - llm.extract: "Owner Department"
+    normalize: squeeze_spaces
+
+  contact_email:
+    required: false
+    type: email
+    cms_key: hoster_email
+    from:
+      - llm.extract: "Contact Email"
+    validators: [email_format]
+    normalize: lower_trim
+
+  list_sdg:
+    required: false
+    type: list[int]
+    length: 27
+    allowed_values: [0, 1]
+    cms_key: list_sdg
+    index_map:
+      - SDG1 - No Poverty
+      - SDG2 - Zero Hunger
+      - SDG3 - Good Health
+      - SDG4 - Quality Education
+      - SDG5 - Gender Equality
+      - SDG6 - Clean Water
+      - SDG7 - Affordable & Clean Energy
+      - SDG8 - Decent Work & Growth
+      - SDG9 - Industry, Innovation & Infra
+      - SDG10 - Reduced Inequalities
+      - SDG11 - Sustainable Cities
+      - SDG12 - Responsible Consumption
+      - SDG13 - Climate Action
+      - SDG14 - Life Below Water
+      - SDG15 - Life on Land
+      - SDG16 - Peace, Justice & Institutions
+      - SDG17 - Partnerships for the Goals
+      - 人
+      - 文
+      - 地
+      - 產
+      - 景
+      - 德
+      - 智
+      - 體
+      - 群
+      - 美
+    from:
+      - llm.classify: "Return a 27-length binary array in the above order (0/1 only)."
+    validators: [list_length_equals_27, list_values_in_0_1]
+    submit_transform: join_with_comma
+
+  weight_description:
+    required: false
+    type: dict[str, str]
+    cms_key: weight_description
+    from:
+      - llm.generate: "For each positive index in list_sdg, produce an HTML <p>...</p> description keyed by its 1-based code (e.g., '3','7')."
+    validators:
+      - keys_in_1_to_27
+      - html_whitelist_p_only
+    normalize: [ensure_html_p_wrapped]
+    submit_transform: to_json_string
+
+normalizers:
+  trim_spaces: "strip leading/trailing spaces"
+  squeeze_spaces: "collapse consecutive spaces"
+  lower_trim: "lowercase then trim"
+  to_iso_date: "parse yyyy/mm/dd、yyyy.mm.dd 等為 yyyy-mm-dd"
+  date_roc_to_iso: "民國年轉西元年 (例如 114/08/01 → 2025-08-01)"
+  currency_to_number: "去符號/千分位/中文數字; 區間取上限並備註 evidence"
+  ensure_html_p_wrapped: "若值為純文字則包成 <p>…</p>"
+
+validators:
+  email_format: { regex: "^[^ @]+@[^ @]+[.][^ @]+$" }
+  must_be_after: "end_date > start_date"
+  list_length_equals_27: "len(list_sdg) == 27"
+  list_values_in_0_1: "所有元素只能為 0 或 1"
+  keys_in_1_to_27: "字典鍵為 '1'..'27'"
+  html_whitelist_p_only: "只允許 <p> 標籤"

@@ -1,0 +1,97 @@
+model: Project
+
+globals:
+  prefill:
+    sources: [llm]
+    n_best: 1
+    confidence_weights: { llm: 0.5, rag: 0.3, validator: 0.2 }
+    default_thresholds: { required_field: 0.75, optional_field: 0.6 }
+
+  ui_defaults:
+    style: card
+    show_confidence: true
+    show_evidence: on_demand
+    quick_actions: [accept, edit, show_evidence, skip]
+
+steps:
+  - name: 標題
+    fill: title
+    ask_when: missing_or_low_confidence
+    min_confidence: 0.80
+    prompt_when_ask: |
+      我從文件中擷取了可能的計畫標題：
+      {{ suggestion_list }}
+      請選擇或修正為正式名稱。
+
+  - name: 摘要
+    fill: summary
+    ask_when: missing_or_low_confidence_or_too_short
+    min_confidence: 0.70
+    too_short_min_chars: 100
+    prompt_when_ask: |
+      這是我讀完文件後整理的 3~5 句摘要：
+      {{ suggestion_best }}
+      要採用嗎？可直接覆寫。
+
+  - name: 期間
+    fill: [start_date, end_date]
+    outputs: [start_date, end_date]
+    ask_when: missing_or_inconsistent
+    min_confidence: 0.75
+    consistency_rules: [end_after_start]
+    prompt_when_ask: |
+      我找到的日期是 {{ start_date_suggestion }} ~ {{ end_date_suggestion }}。
+      請確認或修正（YYYY-MM-DD）。
+
+  - name: 總經費
+    fill: total_budget_twd
+    ask_when: missing_or_low_confidence
+    min_confidence: 0.60
+    prompt_when_ask: |
+      文件內多處金額線索，推定總經費約 {{ suggestion_best }} TWD。
+      要採用嗎？可修正。
+
+  - name: 主管單位
+    fill: owner_department
+    ask_when: missing_or_low_confidence
+    min_confidence: 0.70
+    prompt_when_ask: "檢出之單位為：{{ suggestion_best }}，請確認或修正。"
+
+  - name: 聯絡信箱
+    fill: contact_email
+    ask_when: missing_or_low_confidence
+    min_confidence: 0.70
+    prompt_when_ask: |
+      我找到的聯絡信箱：{{ contact_email_suggestion }}。
+      請確認或補齊。
+
+  - name: SDG/面向分類
+    fill: list_sdg
+    ask_when: missing_or_low_confidence
+    min_confidence: 0.65
+    prompt_when_ask: |
+      這是我預測的 27 向量（0/1）：
+      {{ suggestion_best }}
+      若需調整，請勾選對應標籤（SDG1~17 + 人/文/地/產/景/德/智/體/群/美）。
+    ui:
+      type: checklist_grid
+      options_from_index_map: true
+      groups:
+        - title: "SDGs"
+          range: [1, 17]
+        - title: "十項面向"
+          range: [18, 27]
+
+  - name: 權重描述
+    fill: weight_description
+    ask_when: list_sdg_has_positive
+    min_confidence: 0.60
+    prompt_when_ask: |
+      依勾選代碼，我產生了對應描述（HTML <p>…</p>）。可直接編修：
+      {{ suggestion_best }}
+    ui:
+      input_type: json_textarea
+      helper: "鍵為代碼字串（如 '3','7'），值為 <p>…</p>。僅允許 <p> 標籤。"
+
+commit_policy:
+  rule: "confidence>=threshold OR human_override"

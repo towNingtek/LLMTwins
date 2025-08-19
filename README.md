@@ -36,6 +36,18 @@ pip install -r requirements.txt
 uvicorn server:app --host 0.0.0.0 --port 8002 --reload
 ```
 
+---
+
+```bash=
+sudo apt-get update && sudo apt-get install -y \
+  tesseract-ocr \
+  tesseract-ocr-chi-tra tesseract-ocr-chi-sim tesseract-ocr-eng \
+  ghostscript \
+  libjpeg-dev zlib1g-dev libpng-dev libtiff-dev libwebp-dev libopenjp2-7 \
+  libarchive-tools \
+  build-essential
+```
+
 ### 3) `.env` 範例
 
 ```bash
@@ -293,5 +305,3 @@ server {
 * [ ] Docker Compose（前端 / LLMTwins / Ollama / MinIO / Postgres /（可選）Qdrant / Neo4j）
 
 ---
-
-有需要我再幫你把 **Agent Registry JSON**、**Report JSON 模板**、或 **Docker Compose 草案**補上去。

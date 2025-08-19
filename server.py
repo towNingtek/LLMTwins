@@ -16,6 +16,16 @@ from dotenv import load_dotenv
 from policy.guard import DenyGuard
 from fastapi import UploadFile, File
 
+import yaml
+from copy import deepcopy
+from app.state_store import ConversationStateStore
+
+from fastapi import Query
+import glob
+
+# from app.pdf_ingest import ingest_first_pdf_and_write_parsed, list_required_fields
+
+
 # ============================================================================
 # Configuration & Initialization
 # ============================================================================
@@ -61,6 +71,54 @@ app.add_middleware(
 # Session helpers
 # ----------------------------------------------------------------------------
 
+def _deep_merge(a, b):
+    """dict 深合併：b 覆蓋 a"""
+    if not isinstance(a, dict) or not isinstance(b, dict):
+        return deepcopy(b)
+    out = deepcopy(a)
+    for k, v in b.items():
+        if k in out and isinstance(out[k], dict) and isinstance(v, dict):
+            out[k] = _deep_merge(out[k], v)
+        else:
+            out[k] = deepcopy(v)
+    return out
+
+
+def _init_session_files(session_id: str, model: str = "project") -> dict:
+    """
+    建立 session 目錄與生效模板：
+      sessions/<sid>/{config,state,artifacts}/
+      sessions/<sid>/config/effective_conversation_template.yaml
+    """
+    sdir = _session_dir(session_id)
+    _ensure_dir(sdir / "config")
+    _ensure_dir(sdir / "state")
+    _ensure_dir(sdir / "artifacts")
+
+    base_tpl = BASE_DIR / f"configs/conversation_templates/{model}.yaml"
+    eff_path = sdir / "config" / "effective_conversation_template.yaml"
+    overrides_path = sdir / "config" / "template_overrides.yaml"
+
+    # 讀 global 模板
+    if not base_tpl.exists():
+        return {"ok": False, "reason": f"missing global template: {base_tpl}"}
+    with base_tpl.open("r", encoding="utf-8") as f:
+        base_cfg = yaml.safe_load(f) or {}
+
+    # 合併 overrides（若有）
+    if overrides_path.exists():
+        with overrides_path.open("r", encoding="utf-8") as f:
+            overrides = yaml.safe_load(f) or {}
+        eff_cfg = _deep_merge(base_cfg, overrides)
+    else:
+        eff_cfg = base_cfg
+
+    # 輸出生效版
+    with eff_path.open("w", encoding="utf-8") as f:
+        yaml.safe_dump(eff_cfg, f, allow_unicode=True, sort_keys=False)
+
+    return {"ok": True, "effective": str(eff_path)}
+
 def _ensure_dir(p: Path):
     p.mkdir(parents=True, exist_ok=True)
 
@@ -88,6 +146,8 @@ def _append_history(session_id: str, role: str, content: str):
 @app.on_event("startup")
 async def load_policy_on_startup():
     """Load policy guard on startup"""
+    app.state.state_store = ConversationStateStore(SESS_BASE)
+
     try:
         app.state.deny_guard = DenyGuard.load_from_path(DENYLIST_PATH)
         app.state.deny_enabled = DENY_ENABLED
@@ -591,18 +651,152 @@ async def create_session():
     """Create a new session and prepare directories for future uploads/history."""
     sid = "sess_" + uuid.uuid4().hex
     d = _session_dir(sid)
-    _ensure_dir(d / "raw")  # placeholder for future uploads
-    # Optionally initialize empty files for future modules
-    # (d / "parsed.json").write_text("{}", encoding="utf-8")
-    return {"session_id": sid}
+    _ensure_dir(d / "raw")
+    _ensure_dir(d / "config")
+    _ensure_dir(d / "state")
+    _ensure_dir(d / "artifacts")
 
-from fastapi import UploadFile, File  # 確保有這行
+    # 生成 effective template（你已經有 _init_session_files）
+    init_res = _init_session_files(sid, model="project")
+
+    # 初始化對話狀態
+    try:
+        st = app.state.state_store.init_session(sid)
+    except Exception as e:
+        st = {"error": f"state init failed: {e}"}
+
+    return {"session_id": sid, "init": init_res, "state": st}
+
+def _parse_first_pdf_and_write(session_id: str) -> dict:
+    """
+    委派給 app.pdf_ingest 模組；此函式僅負責：
+      - 呼叫 ingest
+      - 更新 state
+      - 寫入簡短 system log
+    """
+    from app.pdf_ingest import ingest_first_pdf_and_write_parsed, list_required_fields
+    res = ingest_first_pdf_and_write_parsed(
+        session_id=session_id,
+        sess_base=SESS_BASE,
+        base_dir=BASE_DIR,
+        model="project",
+    )
+
+    if not res.ok:
+        return {"ok": False, "error": res.error or "ingest failed"}
+
+    # required fields
+    try:
+        pending_fields = list_required_fields(BASE_DIR, model="project")
+    except Exception as e:
+        pending_fields = []
+        print("[state] list_required_fields error:", e)
+
+    # 更新 state
+    try:
+        app.state.state_store.mark_parsed(
+            session_id,
+            filename=res.filename,
+            pages=res.pages,
+            pending_fields=pending_fields,
+        )
+    except Exception as e:
+        print("[state] mark_parsed error:", e)
+
+    # 系統訊息
+    try:
+        ocr_tag = f", ocr_used={res.ocr_used}, ocr_quality={res.ocr_quality or '-'}"
+        _append_history(session_id, "system",
+                        f"[parsed] {res.filename} → artifacts/parsed.json (pages={res.pages}, chunks={res.chunks}{ocr_tag})")
+    except Exception:
+        pass
+
+    return {"ok": True, "pages": res.pages, "chunks": res.chunks, "filename": res.filename}
+
+# ===== PDF 解析與安全切塊（v0.1，無 OCR/RAG）=====
+import os, re, glob, json
+from datetime import datetime, timezone
+from pdfminer.high_level import extract_text
+import yaml
+
+SAFE_CHUNK_SIZE = 1200   # 每塊上限字元
+SAFE_OVERLAP    = 120    # 塊間重疊
+
+def _clean_text(s: str) -> str:
+    s = s.replace("\x00", "")
+    s = re.sub(r"[ \t]+", " ", s)
+    s = re.sub(r"\r\n", "\n", s)
+    s = re.sub(r"\n{3,}", "\n\n", s)
+    return s.strip()
+
+def _paragraph_split(s: str):
+    parts = [p.strip() for p in s.split("\n\n") if p.strip()]
+    return parts if len(parts) > 2 else [s]
+
+def _make_chunks(text: str, page: int, base_id: str):
+    chunks = []
+    if not text.strip():
+        return chunks
+    paras = _paragraph_split(text)
+    buf = ""
+    start_idx = 0
+    cid = 1
+    for para in paras:
+        add = (buf + ("\n\n" if buf else "") + para).strip()
+        if len(add) <= SAFE_CHUNK_SIZE:
+            buf = add
+            continue
+        if buf:
+            end_idx = start_idx + len(buf)
+            chunks.append({"id": f"{base_id}c{cid}", "page": page,
+                           "start_char": start_idx, "end_char": end_idx, "text": buf})
+            cid += 1
+            keep = buf[-SAFE_OVERLAP:] if len(buf) > SAFE_OVERLAP else buf
+            buf = (keep + "\n\n" + para).strip()
+            start_idx = end_idx - len(keep)
+        else:
+            long = para
+            pos = 0
+            while pos < len(long):
+                piece = long[pos:pos+SAFE_CHUNK_SIZE]
+                end_idx = start_idx + len(piece)
+                chunks.append({"id": f"{base_id}c{cid}", "page": page,
+                               "start_char": start_idx, "end_char": end_idx, "text": piece})
+                cid += 1
+                pos += SAFE_CHUNK_SIZE - SAFE_OVERLAP
+                start_idx = end_idx - SAFE_OVERLAP
+            buf = ""
+            start_idx += SAFE_OVERLAP
+    if buf:
+        end_idx = start_idx + len(buf)
+        chunks.append({"id": f"{base_id}c{cid}", "page": page,
+                       "start_char": start_idx, "end_char": end_idx, "text": buf})
+    return chunks
+
+def _extract_pages_text(pdf_path: str):
+    full = extract_text(pdf_path) or ""
+    # pdfminer 會用 \x0c 當分頁；沒有就當單頁
+    pages = [p for p in full.split("\x0c") if p.strip()] or [full]
+    return [_clean_text(p) for p in pages]
+
+def _pending_fields_from_catalog(model: str = "project"):
+    """讀 configs/field_catalogs/{model}.yaml → 回傳必填欄位清單"""
+    path = BASE_DIR / f"configs/field_catalogs/{model}.yaml"
+    with open(path, "r", encoding="utf-8") as f:
+        cfg = yaml.safe_load(f) or {}
+    fields = (cfg.get("fields") or {}).items()
+    required = [name for name, spec in fields if (spec or {}).get("required") is True]
+    return required
 
 @app.post("/api/sessions/{session_id}/upload")
-async def upload_to_session(session_id: str, file: UploadFile = File(...)):
+async def upload_to_session(
+    session_id: str,
+    file: UploadFile = File(...),
+    auto_parse: bool = Query(True, description="是否自動解析 PDF 並更新 state")
+):
     """
     Upload a file into a session. The file will be stored under sessions/<sid>/raw/.
-    Returns simple metadata for frontend display.
+    Returns metadata, and optionally triggers parse->artifacts/parsed.json.
     """
     d = _session_dir(session_id)
     raw_dir = d / "raw"
@@ -626,17 +820,24 @@ async def upload_to_session(session_id: str, file: UploadFile = File(...)):
                 size += len(chunk)
                 out.write(chunk)
     finally:
-        # starlette UploadFile has async .close(), not .aclose()
         try:
             await file.close()
         except Exception:
             pass
 
-    # 可選：把上傳事件寫進 chat_history
+    # 把上傳事件寫進 chat_history
     try:
         _append_history(session_id, "system", f"[upload] {orig_name} -> raw/{dest_name} ({size} bytes)")
     except Exception:
         pass
+
+    # 如果是 PDF 且 auto_parse=true，就立即解析
+    parse_result = None
+    if suffix == ".pdf" and auto_parse:
+        try:
+            parse_result = _parse_first_pdf_and_write(session_id)
+        except Exception as e:
+            parse_result = {"ok": False, "error": f"parse failed: {e}"}
 
     return {
         "ok": True,
@@ -646,4 +847,23 @@ async def upload_to_session(session_id: str, file: UploadFile = File(...)):
         "size": size,
         "mime": file.content_type,
         "path": str(dest_path.relative_to(SESS_BASE)),
+        "parse": parse_result,
     }
+
+from fastapi import HTTPException
+
+@app.get("/api/sessions/{session_id}/state")
+async def get_session_state(session_id: str):
+    """
+    回傳 sessions/<sid>/state/conversation_state.json 的內容
+    """
+    try:
+        st = app.state.state_store.get(session_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"state error: {e}")
+
+    if not st:
+        # 可能 session 不存在、或尚未 init_session
+        raise HTTPException(status_code=404, detail="state not found")
+
+    return {"ok": True, "state": st}
