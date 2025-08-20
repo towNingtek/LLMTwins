@@ -7,7 +7,7 @@ if [ -z "$SID" ]; then
   exit 1
 fi
 
-SRC="sessions/$SID/raw/1755591374148_32fb8004550b4243967ae829be463263.pdf"
+SRC="sessions/$SID/raw/1755611558972_a662ab0a8a81468aba62680b309ff5da.pdf"
 
 # 上傳 PDF 並觸發解析
 curl -s -F "file=@$SRC;type=application/pdf" \
