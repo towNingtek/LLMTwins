@@ -8,12 +8,13 @@ from app.services.state_utils import read_state, write_state
 from app.services.parsed_text import extract_plaintext
 from app.services.field_prompts import prompt_name, prompt_philosophy, prompt_sdg
 from app.services.demo_mode import in_demo_mode, pick_demo_payload, fake_upload
+# 新增 import
+from app.core.ndjson import ndjson_line, one_shot_ndjson
+from app.core.regexes import YES_RE, NO_RE, UPLOAD_RE
+from app.services.json_parse import parse_json_loose, extract_first_json
 
 router = APIRouter(prefix="/api", tags=["chat"])
 
-YES_RE = re.compile(r"(好|好的|是|ok|okay|yes|可以|幫我|開始)", re.I)
-NO_RE  = re.compile(r"(先不要|不要|否|no|稍後|等等)", re.I)
-UPLOAD_RE = re.compile(r"(上傳|送出|提交|直接上傳|幫我上傳)", re.I)
 # ===== 共用：呼叫上游的小工具 =====
 DEFAULT_UPSTREAM_TIMEOUT = int(os.getenv("UPSTREAM_TIMEOUT", "180"))
 
@@ -50,55 +51,6 @@ def _fallback_from_parsed(plain_text: str):
 
 
 import re, json
-
-_JSON_BLOCK_RE = re.compile(r"\{[\s\S]*\}")
-
-def parse_json_loose(txt: str) -> dict:
-    """
-    盡可能從上游字串撈出『最後一段 JSON 物件』：
-    - 支援有 code fence ``` 的情況
-    - 支援外層還包一層 {"message":{"content":"{...}"}}
-    - 找不到時回 {}
-    """
-    if not txt:
-        return {}
-    txt = txt.strip()
-
-    # 情況1：已是物件
-    if txt.startswith("{") and txt.endswith("}"):
-        try:
-            return json.loads(txt)
-        except Exception:
-            pass
-
-    # 情況2：上游 wrapper：{"message":{"content":"{...}"}}
-    try:
-        obj = json.loads(txt)
-        # 常見包法
-        raw = ((obj.get("message") or {}).get("content")) or obj.get("response")
-        if isinstance(raw, str):
-            return parse_json_loose(raw)
-    except Exception:
-        pass
-
-    # 情況3：帶 ```json / ``` 包起來
-    fence = re.findall(r"```(?:json)?\s*([\s\S]*?)```", txt, flags=re.I)
-    if fence:
-        for seg in reversed(fence):
-            try:
-                return json.loads(seg.strip())
-            except Exception:
-                continue
-
-    # 情況4：從整段撈最後一個 {...}
-    blocks = _JSON_BLOCK_RE.findall(txt)
-    for seg in reversed(blocks):
-        try:
-            return json.loads(seg.strip())
-        except Exception:
-            continue
-
-    return {}
 
 async def _ask_upstream_json(base_url: str, model: str, messages: list, timeout_s: int = DEFAULT_UPSTREAM_TIMEOUT):
     """
@@ -221,37 +173,6 @@ def _need_repair(p: dict) -> bool:
     wd_empty = (not isinstance(wd, dict)) or (len(wd) == 0)
     return name_empty or phil_empty or ls_invalid or wd_empty
 
-def _extract_first_json(s: str) -> str:
-    """從文字中擷取『最大』且括號平衡的 JSON 物件。容錯：移除```json code fence。"""
-    if not s:
-        return ""
-    s = s.strip()
-    # 移除 code fence
-    if s.startswith("```"):
-        s = s.strip("`")
-        s = s.replace("json", "", 1) if s.lower().startswith("json") else s
-    # 直接是純 JSON
-    if s.startswith("{") and s.endswith("}"):
-        return s
-    # 以堆疊掃描所有 JSON 片段，回最長的一段
-    best = ""
-    start = -1
-    depth = 0
-    for i, ch in enumerate(s):
-        if ch == "{":
-            if depth == 0:
-                start = i
-            depth += 1
-        elif ch == "}":
-            if depth > 0:
-                depth -= 1
-                if depth == 0 and start >= 0:
-                    cand = s[start:i+1]
-                    if len(cand) > len(best):
-                        best = cand
-                    start = -1
-    return best
-
 def _validate_and_fix_payload(obj: dict) -> dict:
     """固定 email、不足日期用今年整年、檢查 list_sdg 長度=27、限制 weight_description key 僅為 1 的索引、推 is_budget_revealed。"""
     fixed_email = "forus999@gmail.com"
@@ -320,16 +241,6 @@ async def _post_cms_upload(payload: dict) -> tuple[int, dict, str]:
             except Exception:
                 data = {}
             return r.status, data, raw
-
-
-def one_shot_ndjson(text: str):
-    async def gen():
-        yield ndjson_line({"message": {"role": "assistant", "content": text}, "done": False})
-        yield ndjson_line({"done": True})
-    return gen
-
-def ndjson_line(obj: dict) -> bytes:
-    return (json.dumps(obj, ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8")
 
 def _get_last_user_text(messages):
     for msg in reversed(messages or []):
