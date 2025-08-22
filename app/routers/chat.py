@@ -8,239 +8,17 @@ from app.services.state_utils import read_state, write_state
 from app.services.parsed_text import extract_plaintext
 from app.services.field_prompts import prompt_name, prompt_philosophy, prompt_sdg
 from app.services.demo_mode import in_demo_mode, pick_demo_payload, fake_upload
-# 新增 import
 from app.core.ndjson import ndjson_line, one_shot_ndjson
 from app.core.regexes import YES_RE, NO_RE, UPLOAD_RE
 from app.services.json_parse import parse_json_loose, extract_first_json
-
-router = APIRouter(prefix="/api", tags=["chat"])
-
-# ===== 共用：呼叫上游的小工具 =====
-DEFAULT_UPSTREAM_TIMEOUT = int(os.getenv("UPSTREAM_TIMEOUT", "180"))
-
+from app.services.upstream_client import ask_upstream_json
+from app.services.cms_uploader import post_cms_upload
 from collections import defaultdict
-
-_SDG_HINTS = {
-    "教育": ["4"], "學習": ["4"],
-    "能源": ["7"], "再生能源": ["7"], "太陽能": ["7"], "節能": ["7"],
-    "就業": ["8"], "經濟": ["8"], "創業": ["8"],
-    "產業": ["9"], "創新": ["9"], "基礎設施": ["9"],
-    "城市": ["11"], "社區": ["11"], "交通": ["11"], "大眾運輸": ["11"], "無障礙": ["11"],
-    "循環": ["12"], "回收": ["12"], "廢棄物": ["12"],
-    "氣候": ["13"], "減碳": ["13"], "淨零": ["13"],
-    "生態": ["15"], "保育": ["15"], "濕地": ["15"],
-    "夥伴": ["17"], "跨域": ["17"], "公私協力": ["17"],
-}
-
-def _fallback_from_parsed(plain_text: str):
-    bits = ["0"] * 27
-    score = defaultdict(int)
-    text = (plain_text or "")[:8000]
-    for kw, ids in _SDG_HINTS.items():
-        if kw in text:
-            for sid in ids:
-                score[sid] += 1
-    top = sorted(score.items(), key=lambda x: (-x[1], int(x[0])))[:4] or [("11", 1)]
-    chosen = {sid for sid, _ in top}
-    for sid in chosen:
-        idx = int(sid) - 1
-        if 0 <= idx < 27:
-            bits[idx] = "1"
-    wd = {k: f"<p>本計畫與 SDG {k} 具關聯，資料有限，將於送審前再精修。</p>" for k in chosen}
-    return {"list_sdg": ",".join(bits), "weight_description": wd}
-
-
+from app.services.payload_rules import validate_and_fix_payload, need_repair
+from app.services.fallback_heuristics import fallback_from_plaintext, fallback_from_parsed_clip
 import re, json
 
-async def _ask_upstream_json(base_url: str, model: str, messages: list, timeout_s: int = DEFAULT_UPSTREAM_TIMEOUT):
-    """
-    打上游 /api/chat，非串流，回傳 (ok, raw_text)。
-    - 逾時 / 連線問題 → (False, "error: ...")
-    """
-    try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout_s, connect=10)) as s2:
-            async with s2.post(f"{base_url}/api/chat",
-                               data=json.dumps({"model": model, "stream": False, "messages": messages}, ensure_ascii=False),
-                               headers={"Content-Type": "application/json", "Accept-Encoding": "identity"}) as r2:
-                txt = await r2.text()
-        return True, txt
-    except asyncio.TimeoutError:
-        return False, "timeout"
-    except Exception as e:
-        return False, f"error: {e}"
-
-def _normalize_ocr_spaces(text: str) -> str:
-    # 把「計 畫 / 國 際 事 務」這類斷字合併
-    return re.sub(r"(?<=\S)\s+(?=\S)", "", text)
-
-def _is_all_zero_sdg_str(s: str) -> bool:
-    parts = [x.strip() for x in (s or "").split(",") if x.strip() != ""]
-    return len(parts) == 27 and all(x == "0" for x in parts)
-
-def _fallback_from_parsed(parsed_clip: str) -> dict:
-    """
-    從 parsed_clip 粗暴掰一份非空內容：
-    - name：從「名 稱 / 計畫名稱 / 計 畫 書」附近抽一句，合併斷字
-    - philosophy：從「計畫目的 / 執行內容」抓 2~4 句組一段
-    - list_sdg / weight_description：依關鍵字啟發式打 1 並生 <p>…</p>
-    """
-    text = parsed_clip or ""
-    # 1) name
-    name = ""
-    for m in re.finditer(r"(名\s*稱|計\s*畫\s*名\s*稱|計\s*畫\s*書).{0,30}?\n([^\n]{4,40})", text):
-        cand = _normalize_ocr_spaces(m.group(2)).strip("：:|-— \t")
-        if 4 <= len(cand) <= 40:
-            name = cand
-            break
-
-    # 2) philosophy：抽目的/內容段落的前 2~4 句
-    ph = ""
-    m2 = re.search(r"(計\s*畫\s*目\s*的|問題\s*評\s*析|執\s*行\s*內\s*容|工\s*作\s*項\s*目)[^\n]*\n(.{80,600})", text, re.S)
-    if m2:
-        blob = _normalize_ocr_spaces(m2.group(2))
-        # 句子切分（粗略）
-        sents = re.split(r"[。；;]\s*", blob)
-        sents = [s.strip() for s in sents if s.strip()]
-        ph = "；".join(sents[:4])[:200]
-
-    # 3) SDG 啟發式
-    # 先全 0
-    bits = ["0"] * 27
-    desc = {}
-
-    def set_on(idx: int, ptext: str):
-        k = str(idx)
-        bits[idx-1] = "1"
-        if k not in desc:
-            desc[k] = f"<p>{ptext}</p>"
-
-    clean = re.sub(r"\s+", "", text)
-    def has(*kw):
-        return any((k in text) or (k.replace(" ", "") in clean) for k in kw)
-
-    if has("國 際","國際","兩 岸","兩岸","姐妹市","交流","合作","城市外交","外賓","訪問","互訪"):
-        set_on(17, "計畫涉及國際/兩岸合作與城市外交，建立跨域夥伴關係。")
-    if has("城 市","城市","觀 光","觀光","旅遊","燈會","友誼燈區","展演","城市韌性"):
-        set_on(11, "以觀光與城市展演活動提升城市能見度與社區韌性。")
-    if has("產 業","產業","經 濟","經濟","就 業","就業","服務業","觀光產值","招商"):
-        set_on(8, "推動觀光及相關服務業帶動就業與經濟成長。")
-    if has("農 特 產 品","農特產品","行 銷","行銷","產 業 鏈","在地產業"):
-        set_on(21, "連結在地產業與外部市場，推動農特產品行銷。")
-    if has("景 點","景點","活動","旅遊","展演","燈會","推廣"):
-        set_on(22, "以活動與展演帶動景點能見度與旅遊吸引力。")
-    if has("文 化","文化","藝 文","藝文","展 演","在地文化"):
-        set_on(19, "透過文化展演與交流，推動在地文化傳播。")
-    if has("研 擬","研擬","規 劃","規劃","培 力","培力","知 識","知識","教育","課程","培訓"):
-        set_on(24, "涉及規劃與能力培力，強化知識與治理能力。")
-    if has("社 群","社群","協 作","協作","公私協力","國際團體","參 與","參與"):
-        set_on(26, "跨部門與社群合作，增進集體參與與協作。")
-    if has("美 學","美學","城市意象","景觀","裝置","展演美感"):
-        set_on(27, "以展演與景觀營造公共美學與城市意象。")
-
-    # 至少保證 4 個為 1（若不足，優先補 17,11,8,22）
-    if bits.count("1") < 4:
-        for idx in (17,11,8,22):
-            set_on(idx, desc.get(str(idx), "與國際交流、觀光與城市活動相關。"))
-
-    result = {
-        "name": name or "（待補正式名稱）",
-        "philosophy": ph or "本計畫旨在推動國際交流與城市觀光合作，結合展演及在地產業行銷，以提升能見度與經濟效益。",
-        "list_sdg": ",".join(bits),
-        "weight_description": desc
-    }
-    # show debug msg
-    print("Debug: Fallback upload payload:", json.dumps(result, ensure_ascii=False, indent=2))
-
-    return result
-
-def _is_all_zero_sdg(ls: str) -> bool:
-    bits = [b.strip() for b in (ls or "").split(",") if b.strip() != ""]
-    # 剛好 27 位，且全部為 0 → 視為無效
-    return len(bits) == 27 and all(b == "0" for b in bits)
-
-def _need_repair(p: dict) -> bool:
-    """只要有任何一項是『空/無效』，就回 True 代表需要再催一次 LLM。"""
-
-    # Debug show payload
-    print("Debug: payload to check:", json.dumps(p, ensure_ascii=False, indent=2))
-
-    if not isinstance(p, dict):
-        return True
-    name_empty = not str(p.get("name") or "").strip()
-    phil_empty = not str(p.get("philosophy") or "").strip()
-    ls_invalid = _is_all_zero_sdg(str(p.get("list_sdg") or ""))
-    wd = p.get("weight_description")
-    wd_empty = (not isinstance(wd, dict)) or (len(wd) == 0)
-    return name_empty or phil_empty or ls_invalid or wd_empty
-
-def _validate_and_fix_payload(obj: dict) -> dict:
-    """固定 email、不足日期用今年整年、檢查 list_sdg 長度=27、限制 weight_description key 僅為 1 的索引、推 is_budget_revealed。"""
-    fixed_email = "forus999@gmail.com"
-
-    # 1) email 固定
-    obj["email"] = fixed_email
-
-    # 2) 日期 fallback：抓不到就今年整年
-    year = datetime.datetime.now().year
-    def _date_or_fallback(k, default):
-        v = (obj.get(k) or "").strip()
-        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", v):
-            return v
-        return default
-    start_fb = f"{year}-01-01"
-    end_fb   = f"{year}-12-31"
-    obj["project_start_date"] = _date_or_fallback("project_start_date", start_fb)
-    obj["project_due_date"]   = _date_or_fallback("project_due_date",   end_fb)
-
-    # 3) list_sdg 必須 27 位 0/1
-    ls = (obj.get("list_sdg") or "").strip()
-    bits = [b.strip() for b in ls.split(",") if b.strip()!=""]
-    if len(bits) != 27 or any(b not in ("0","1") for b in bits):
-        # 不合法就全部 0（交給下一輪修正也可）
-        bits = ["0"] * 27
-    obj["list_sdg"] = ",".join(bits)
-
-    # 4) weight_description 只保留 list_sdg=1 的索引鍵
-    wd = obj.get("weight_description") or {}
-    if not isinstance(wd, dict):
-        wd = {}
-    ones = {str(i+1) for i,b in enumerate(bits) if b=="1"}
-    wd = {k: v for k, v in wd.items() if str(k) in ones}
-    obj["weight_description"] = wd
-
-    # 5) budget 與 is_budget_revealed
-    try:
-        budget = int(obj.get("budget") or 0)
-    except Exception:
-        budget = 0
-    obj["budget"] = budget
-    obj["is_budget_revealed"] = bool(budget > 0)
-
-    # 6) org/hoster_email 若不是字串就設為 None
-    if obj.get("org") is not None and not isinstance(obj.get("org"), str):
-        obj["org"] = None
-    if obj.get("hoster_email") is not None and not isinstance(obj.get("hoster_email"), str):
-        obj["hoster_email"] = None
-
-    # 7) name/philosophy 至少確保是字串
-    obj["name"] = str(obj.get("name") or "").strip()
-    obj["philosophy"] = str(obj.get("philosophy") or "").strip()
-
-    return obj
-
-CMS_UPLOAD_URL = "https://beta-tplanet-backend.4impact.cc/projects/upload"
-
-async def _post_cms_upload(payload: dict) -> tuple[int, dict, str]:
-    data = {k: (json.dumps(v, ensure_ascii=False) if k=="weight_description" and not isinstance(v, str) else ("" if v is None else str(v)))
-            for k, v in payload.items()}
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=120)) as s:
-        async with s.post(CMS_UPLOAD_URL, data=data) as r:  # 這裡 aiohttp 會自動用 x-www-form-urlencoded
-            raw = await r.text()
-            try:
-                data = json.loads(raw)
-            except Exception:
-                data = {}
-            return r.status, data, raw
+router = APIRouter(prefix="/api", tags=["chat"])
 
 def _get_last_user_text(messages):
     for msg in reversed(messages or []):
@@ -273,6 +51,11 @@ async def _fake_stream_from_full(payload_bytes: bytes, base_url: str):
 
 @router.post("/chat")
 async def proxy_ollama_chat(request: Request):
+    settings = request.app.state.settings
+    base_url   = settings.ollama_base_url
+    sess_base  = settings.sess_base
+    deny_enabled = settings.deny_enabled
+
     payload_bytes = await request.body()
     # 解析請求
     try:
@@ -387,7 +170,7 @@ async def proxy_ollama_chat(request: Request):
                     if "cms" not in st:
                         st["cms"] = {}
 
-                    status_code, data, raw = await _post_cms_upload(payload)
+                    status_code, data, raw = await post_cms_upload(pending, settings.cms_upload_url)
 
                     # debug msg
                     print("Debug: CMS upload response:", status_code, data, raw)
@@ -645,13 +428,13 @@ async def proxy_ollama_chat(request: Request):
             # 原本組 messages OK，改成用共用函式
             print("Debug: Asking upstream for name with payload:", json.dumps(upstream_payload, ensure_ascii=False))
                         # 第一次請求
-            ok, txt = await _ask_upstream_json(
+            ok, txt = await ask_upstream_json(
                 base_url, body.get("model"),
                 [
                     {"role": "system", "content": system},
                     {"role": "user", "content": user},
                 ],
-                timeout_s=DEFAULT_UPSTREAM_TIMEOUT,
+                timeout_s=settings.upstream_timeout_s,
             )
 
             name_val = ""
@@ -667,13 +450,13 @@ async def proxy_ollama_chat(request: Request):
             # 若第一次失敗或結果為空 → 重送一次
             if not name_val:
                 print("Debug: name retry once ...")
-                ok, txt = await _ask_upstream_json(
+                ok, txt = await ask_upstream_json(
                     base_url, body.get("model"),
                     [
                         {"role": "system", "content": system},
                         {"role": "user", "content": user},
                     ],
-                    timeout_s=DEFAULT_UPSTREAM_TIMEOUT,
+                    timeout_s=settings.upstream_timeout_s,
                 )
                 if ok:
                     try:
@@ -716,10 +499,10 @@ async def proxy_ollama_chat(request: Request):
                     {"role": "user", "content": user},
                 ],
             }
-            ok, txt = await _ask_upstream_json(base_url, body.get("model"), [
+            ok, txt = await ask_upstream_json(base_url, body.get("model"), [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
-            ], timeout_s=DEFAULT_UPSTREAM_TIMEOUT)
+            ], timeout_s=settings.upstream_timeout_s,)
 
             print("Debug: Upstream response for philosophy:", txt)
 
@@ -780,13 +563,13 @@ async def proxy_ollama_chat(request: Request):
 
             print("Debug: SDG prompt length:", len(user))
 
-            ok, txt = await _ask_upstream_json(
+            ok, txt = await ask_upstream_json(
                 base_url, body.get("model"),
                 [
                     {"role": "system", "content": system},
                     {"role": "user", "content": user},
                 ],
-                timeout_s=DEFAULT_UPSTREAM_TIMEOUT,
+                timeout_s=settings.upstream_timeout_s,
             )
 
             print("Debug: Upstream response for SDG:", txt)
@@ -805,9 +588,10 @@ async def proxy_ollama_chat(request: Request):
 
             # 4) 保底：避免全 0 或描述為空（啟發式）
             if all(b == "0" for b in bits) or not isinstance(cand_wd, dict) or not cand_wd:
-                fb = _fallback_from_parsed(plain)
+                fb = fallback_from_plaintext(plain)
                 list_sdg = fb.get("list_sdg", list_sdg)
                 cand_wd = fb.get("weight_description", cand_wd)
+
 
             # 5) 回寫 payload
             st.setdefault("cms", {}).setdefault("pending_payload", {})["list_sdg"] = list_sdg
@@ -869,8 +653,8 @@ async def proxy_ollama_chat(request: Request):
                                         headers={"X-Session-Mode":"session"})
 
             # 送到 CMS
-            pending = _validate_and_fix_payload(pending or {})
-            status_code, data, raw = await _post_cms_upload(pending)
+            pending = validate_and_fix_payload(pending or {})
+            status_code, data, raw = await post_cms_upload(pending)
 
             if 200 <= status_code < 300:
                 uuid = data.get("uuid") or data.get("id") or ""
