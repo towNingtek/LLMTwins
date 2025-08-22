@@ -26,6 +26,9 @@ settings = load_settings(BASE_DIR)
 
 app = FastAPI()
 
+BASE_DIR = Path(__file__).resolve().parent
+app.state.settings = load_settings(BASE_DIR)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
