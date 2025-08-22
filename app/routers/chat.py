@@ -4,8 +4,8 @@ import aiohttp
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse, JSONResponse
 from app.session_utils import append_history
-from app.services.state_utils import read_state, write_state
-from app.services.parsed_text import extract_plaintext
+from app.services.state_store import read_state, write_state
+from app.services.parsed_reader import extract_plaintext
 from app.services.field_prompts import prompt_name, prompt_philosophy, prompt_sdg
 from app.services.demo_mode import in_demo_mode, pick_demo_payload, fake_upload
 from app.core.ndjson import ndjson_line, one_shot_ndjson
