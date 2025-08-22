@@ -16,7 +16,12 @@ from app.services.cms_uploader import post_cms_upload
 from collections import defaultdict
 from app.services.payload_rules import validate_and_fix_payload, need_repair
 from app.services.fallback_heuristics import fallback_from_plaintext, fallback_from_parsed_clip
-import re, json
+from app.flows.doc_flow import (
+    handle_doc_parsed_entry, handle_awaiting_confirm,
+    prepare_aligning, prompt_aligned_tip, handle_upload
+)
+from app.flows.fields_flow import step_f_name, step_f_philosophy, step_f_sdg
+from app.core.regexes import YES_RE, UPLOAD_RE  # 若上面已引入，可保留
 
 router = APIRouter(prefix="/api", tags=["chat"])
 
@@ -118,365 +123,51 @@ async def proxy_ollama_chat(request: Request):
         except Exception:
             st = {}
 
-        # A) 剛 parsed 完：先回引導訊息，並把 step -> awaiting_confirm
-        if st.get("mode") == "doc_aligned" and st.get("step") == "parsed" and st.get("doc"):
-            st["step"] = "awaiting_confirm"
+        # === A) 剛 parsed 完
+        if session_mode and st.get("mode") == "doc_aligned" and st.get("step") == "parsed" and st.get("doc"):
+            text, st = handle_doc_parsed_entry(st)
             write_state(sess_base, session_id, st)
-            doc = st["doc"] or {}
-            filename = doc.get("filename", "已上傳文件")
-            pages = doc.get("pages", "?")
-            guide = (
-                f"我注意到你剛上傳了《{filename}》（{pages} 頁）。\n"
-                f"要不要我幫你把內容轉成『永續專案』並直接上傳到永續系統？\n"
-                f"請回覆：『好』或『先不要』。"
-            )
+            append_history(session_id, "assistant", text, sess_base)
+            return (StreamingResponse(one_shot_ndjson(text)(), media_type="application/x-ndjson",
+                    headers={"Cache-Control":"no-cache","X-Accel-Buffering":"no","X-Session-Mode":"session"})
+                    if want_stream else JSONResponse({"model": body.get("model"),"message":{"role":"assistant","content":text},"done":True},
+                    headers={"X-Session-Mode":"session"}))
 
-            # 記錄歷史，並本地回一條 NDJSON
-            append_history(session_id, "assistant", guide, sess_base)
-            if want_stream:
-                return StreamingResponse(
-                    one_shot_ndjson(guide)(),
-                    media_type="application/x-ndjson",
-                    headers={"Cache-Control":"no-cache","X-Accel-Buffering":"no",
-                             "X-Session-Mode":"session"}
-                )
-            else:
-                return JSONResponse(
-                    {"model": body.get("model"),
-                     "message": {"role":"assistant","content": guide},
-                     "done": True},
-                    headers={"X-Session-Mode":"session"}
-                )
-
-        # B) 等使用者回覆：判斷 好 / 先不要
-        if st.get("mode") == "doc_aligned" and st.get("step") == "awaiting_confirm":
+        # === B) awaiting_confirm
+        if session_mode and st.get("mode") == "doc_aligned" and st.get("step") == "awaiting_confirm":
             user_text = _get_last_user_text(messages) or ""
-
-            # show debug 
-            print("Debug: User response in awaiting_confirm:", user_text)
-            if YES_RE.search(user_text):
-                # === Demo：秒出完整草稿，並且立刻上傳到 CMS ===
-                if in_demo_mode():
-                    # 🔥 確保 st 不是 None - 移到最前面
-                    if st is None:
-                        st = {}
-                        print("Warning: session state was None, initialized empty dict")
-
-                    payload = pick_demo_payload()
-                    # Show debug
-                    print("Debug: Demo mode, using payload:", json.dumps(payload, ensure_ascii=False, indent=2))
-
-                    # 確保 cms 字典存在
-                    if "cms" not in st:
-                        st["cms"] = {}
-
-                    status_code, data, raw = await post_cms_upload(pending, settings.cms_upload_url)
-
-                    # debug msg
-                    print("Debug: CMS upload response:", status_code, data, raw)
-
-                    if 200 <= status_code < 300:
-                        uuid = data.get("uuid") or data.get("id") or ""
-                        st["step"] = "session_only"
-                        print(f"Debug: st after setting step = {type(st)}")
-
-                        # 🔥 直接設定，不用 setdefault
-                        st["cms"] = {"uuid": uuid}
-
-                        write_state(sess_base, session_id, st)
-                        url = f"https://nsdgs.4impact.cc/content/{uuid}" if uuid else ""
-                        msg = (
-                            "已自動產生並上傳永續專案。\n"
-                            f"專案編號：{uuid or '（未回傳編號）'}" + (f"\n連結：{url}" if uuid else "")
-                        )
-                    else:
-                        # 🔥 在失敗分支也要檢查 st
-                        if st is None:
-                            st = {}
-                            print("Warning: session state was None in failure branch, initialized empty dict")
-
-                        # 上傳失敗就停在 aligned，讓你可以再手動「上傳」
-                        st["cms"] = {"pending_payload": payload}  # 直接設定，不用 setdefault
-                        st["step"] = "aligned"
-
-                        write_state(sess_base, session_id, st)
-                        msg = f"草稿已產生，但上傳失敗 (HTTP {status_code})。\n\n你可回『上傳』再試一次。"
-                    append_history(session_id, "assistant", msg, sess_base)
-                    if want_stream:
-                        return StreamingResponse(one_shot_ndjson(msg)(),
-                                                 media_type="application/x-ndjson",
-                                                 headers={"Cache-Control":"no-cache","X-Accel-Buffering":"no","X-Session-Mode":"session"})
-                    else:
-                        return JSONResponse({"model": body.get("model"),
-                                             "message": {"role":"assistant","content": msg},
-                                             "done": True},
-                                            headers={"X-Session-Mode":"session"})
-                else:
-                    # === 非 Demo 才走原本對話 ===
-                    # 🔥 確保 st 不是 None
-                    if st is None:
-                        st = {}
-                        print("Warning: session state was None in non-demo mode, initialized empty dict")
-
-                    st["step"] = "aligning"  # 下一步將 parsed.json -> 參數 -> 送 CMS
-                    write_state(sess_base, session_id, st)
-                    msg = "收到！等我產出草稿，你回『上傳』我就送到永續系統"
-
-                    append_history(session_id, "assistant", msg, sess_base)
-                    if want_stream:
-                        return StreamingResponse(
-                            one_shot_ndjson(msg)(),
-                            media_type="application/x-ndjson",
-                            headers={"Cache-Control":"no-cache","X-Accel-Buffering":"no",
-                                     "X-Session-Mode":"session"}
-                        )
-                    else:
-                        return JSONResponse(
-                            {"model": body.get("model"),
-                             "message": {"role":"assistant","content": msg},
-                             "done": True},
-                            headers={"X-Session-Mode":"session"}
-                        )
-            elif NO_RE.search(user_text):
-                # show debug
-                print("Debug!!!: User response in awaiting_confirm is NO branch:", user_text)
-
-
-                # 🔥 確保 st 不是 None
-                if st is None:
-                    st = {}
-                    print("Warning: session state was None in NO branch, initialized empty dict")
-
-                st["step"] = "session_only"  # 回到 session_only 狀態
-                write_state(sess_base, session_id, st)
-                msg = "好的，先不轉。如果還有其他需求，請重新上傳文件。"
-
-                append_history(session_id, "assistant", msg, sess_base)
-                if want_stream:
-                    return StreamingResponse(
-                        one_shot_ndjson(msg)(),
-                        media_type="application/x-ndjson",
-                        headers={"Cache-Control":"no-cache","X-Accel-Buffering":"no",
-                                 "X-Session-Mode":"session"}
-                    )
-                else:
-                    return JSONResponse(
-                        {"model": body.get("model"),
-                         "message": {"role":"assistant","content": msg},
-                         "done": True},
-                        headers={"X-Session-Mode":"session"}
-                    )
-            else:
-                # 既不是「好」也不是「先不要」→ 再提醒一次（不改 step）
-                msg = "要不要我幫你把文件轉成永續專案並上傳到永續系統？請回『好』或『先不要』。"
-                append_history(session_id, "assistant", msg, sess_base)
-                if want_stream:
-                    return StreamingResponse(
-                        one_shot_ndjson(msg)(),
-                        media_type="application/x-ndjson",
-                        headers={"Cache-Control":"no-cache","X-Accel-Buffering":"no",
-                                 "X-Session-Mode":"session"}
-                    )
-                else:
-                    return JSONResponse(
-                        {"model": body.get("model"),
-                         "message": {"role":"assistant","content": msg},
-                         "done": True},
-                        headers={"X-Session-Mode":"session"}
-                    )
-                # === 非 Demo 才走原本對話 ===
-
-                st["step"] = "aligning"  # 下一步將 parsed.json -> 參數 -> 送 CMS
-                write_state(sess_base, session_id, st)
-                msg = "收到！等我產出草稿，你回『上傳』我就送到永續系統"
-
-                append_history(session_id, "assistant", msg, sess_base)
-                if want_stream:
-                    return StreamingResponse(
-                        one_shot_ndjson(msg)(),
-                        media_type="application/x-ndjson",
-                        headers={"Cache-Control":"no-cache","X-Accel-Buffering":"no",
-                                 "X-Session-Mode":"session"}
-                    )
-                else:
-                    return JSONResponse(
-                        {"model": body.get("model"),
-                         "message": {"role":"assistant","content": msg},
-                         "done": True},
-                        headers={"X-Session-Mode":"session"}
-                    )
-
-            if NO_RE.search(user_text):
-                st["step"] = "parsed"  # 回到 parsed 狀態
-                write_state(sess_base, session_id, st)
-                msg = "好的，先不轉。你隨時可以說『好』，我會幫你處理上傳。"
-
-                append_history(session_id, "assistant", msg, sess_base)
-                if want_stream:
-                    return StreamingResponse(
-                        one_shot_ndjson(msg)(),
-                        media_type="application/x-ndjson",
-                        headers={"Cache-Control":"no-cache","X-Accel-Buffering":"no",
-                                 "X-Session-Mode":"session"}
-                    )
-                else:
-                    return JSONResponse(
-                        {"model": body.get("model"),
-                         "message": {"role":"assistant","content": msg},
-                         "done": True},
-                        headers={"X-Session-Mode":"session"}
-                    )
-
-            # 既不是「好」也不是「先不要」→ 再提醒一次（不改 step）
-            msg = "要不要我幫你把文件轉成永續專案並上傳到永續系統？請回『好』或『先不要』。"
-            append_history(session_id, "assistant", msg, sess_base)
-            if want_stream:
-                return StreamingResponse(
-                    one_shot_ndjson(msg)(),
-                    media_type="application/x-ndjson",
-                    headers={"Cache-Control":"no-cache","X-Accel-Buffering":"no",
-                             "X-Session-Mode":"session"}
-                )
-            else:
-                return JSONResponse(
-                    {"model": body.get("model"),
-                     "message": {"role":"assistant","content": msg},
-                     "done": True},
-                    headers={"X-Session-Mode":"session"}
-                )
-
-        # C) 進入 aligning：改為逐條流程，先切到 f_name
-        if st.get("step") == "aligning":
-            try:
-                plain = extract_plaintext(sess_base, session_id, max_chars=3000)
-            except Exception as e:
-                msg = f"讀取 parsed.json 失敗：{e}"
-                append_history(session_id, "assistant", msg, sess_base)
-                if want_stream:
-                    return StreamingResponse(one_shot_ndjson(msg)(),
-                                            media_type="application/x-ndjson",
-                                            headers={"Cache-Control":"no-cache","X-Accel-Buffering":"no","X-Session-Mode":"session"})
-                else:
-                    return JSONResponse({"model": body.get("model"),
-                                        "message": {"role":"assistant","content": msg},
-                                        "done": True},
-                                        headers={"X-Session-Mode":"session"})
-
-            if not isinstance(st, dict):
-                st = {}
-            if not isinstance(st.get("cms"), dict):
-                st["cms"] = {}
-
-            st["cms"]["pending_payload"] = {
-                "email": "forus999@gmail.com",  # 先放固定值
-                "project_start_date": "2025-01-01",
-                "project_due_date": "2025-12-31",
-                "list_sdg": "0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0",
-                "weight_description": {},
-                "budget": 0,
-                "is_budget_revealed": False,
-                "name": "",
-                "philosophy": "",
-            }
-            st["cms"]["plain"] = plain  # 後續每欄都用
-            st["step"] = "f_name"
+            text, st = handle_awaiting_confirm(st, user_text)
             write_state(sess_base, session_id, st)
+            append_history(session_id, "assistant", text, sess_base)
+            return (StreamingResponse(one_shot_ndjson(text)(), media_type="application/x-ndjson",
+                    headers={"Cache-Control":"no-cache","X-Accel-Buffering":"no","X-Session-Mode":"session"})
+                    if want_stream else JSONResponse({"model": body.get("model"),"message":{"role":"assistant","content":text},"done":True},
+                    headers={"X-Session-Mode":"session"}))
 
-            tip = "我先從文件裡抓『計畫名稱』，完成後會給你看草稿，沒問題請回「好」。"
-            append_history(session_id, "assistant", tip, sess_base)
-            if want_stream:
-                return StreamingResponse(one_shot_ndjson(tip)(),
-                                        media_type="application/x-ndjson",
-                                        headers={"Cache-Control":"no-cache","X-Accel-Buffering":"no","X-Session-Mode":"session"})
-            else:
-                return JSONResponse({"model": body.get("model"),
-                                    "message": {"role":"assistant","content": tip},
-                                    "done": True},
-                                    headers={"X-Session-Mode":"session"})
-
-        # ---- Demo 快速路徑：直接產生草稿，不讀 PDF、不叫上游 ----
-        if in_demo_mode() and st.get("step") in ("f_name", "f_philosophy", "f_sdg"):
-            st.setdefault("cms", {})["pending_payload"] = pick_demo_payload()
-            st["step"] = "aligned"
+        # === C0) 進入 aligning（由 awaiting_confirm: YES 之後）
+        if session_mode and st.get("step") == "aligning":
+            text, st = prepare_aligning(st, sess_base, session_id)
             write_state(sess_base, session_id, st)
-            pretty = json.dumps(st["cms"]["pending_payload"], ensure_ascii=False)
-            msg = f"（Demo）目前草稿：\n{pretty}\n\n回『上傳』我就幫你送出（Demo 連結）。"
-            append_history(session_id, "assistant", msg, sess_base)
-            if want_stream:
-                return StreamingResponse(one_shot_ndjson(msg)(),
-                                        media_type="application/x-ndjson",
-                                        headers={"Cache-Control":"no-cache","X-Accel-Buffering":"no","X-Session-Mode":"session"})
-            else:
-                return JSONResponse({"model": body.get("model"),
-                                    "message": {"role":"assistant","content": msg},
-                                    "done": True},
-                                    headers={"X-Session-Mode":"session"})
-        # ---- Demo 路徑結束，以下是原本 C1/C2/C3 正常流程 ----
+            append_history(session_id, "assistant", text, sess_base)
+            return (StreamingResponse(one_shot_ndjson(text)(), media_type="application/x-ndjson",
+                    headers={"Cache-Control":"no-cache","X-Accel-Buffering":"no","X-Session-Mode":"session"})
+                    if want_stream else JSONResponse({"model": body.get("model"),"message":{"role":"assistant","content":text},"done":True},
+                    headers={"X-Session-Mode":"session"}))
 
-        # C1) 逐條：抓 name
-        if st.get("step") == "f_name":
-            plain = (st.get("cms") or {}).get("plain") or ""
-            system, user = prompt_name(plain)
-            upstream_payload = {
-                "model": body.get("model"),
-                "stream": False,
-                "messages": [
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user},
-                ],
-            }
-            # 原本組 messages OK，改成用共用函式
-            print("Debug: Asking upstream for name with payload:", json.dumps(upstream_payload, ensure_ascii=False))
-                        # 第一次請求
-            ok, txt = await ask_upstream_json(
-                base_url, body.get("model"),
-                [
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user},
-                ],
-                timeout_s=settings.upstream_timeout_s,
-            )
-
-            name_val = ""
-            if ok:
-                try:
-                    data = json.loads(txt)
-                    raw = ((data.get("message") or {}).get("content")) or data.get("response") or txt
-                    name_obj = json.loads(raw) if raw.strip().startswith("{") else {}
-                    name_val = (name_obj.get("name") or "").strip()
-                except Exception:
-                    name_val = ""
-
-            # 若第一次失敗或結果為空 → 重送一次
-            if not name_val:
-                print("Debug: name retry once ...")
-                ok, txt = await ask_upstream_json(
-                    base_url, body.get("model"),
-                    [
-                        {"role": "system", "content": system},
-                        {"role": "user", "content": user},
-                    ],
-                    timeout_s=settings.upstream_timeout_s,
-                )
-                if ok:
-                    try:
-                        data = json.loads(txt)
-                        raw = ((data.get("message") or {}).get("content")) or data.get("response") or txt
-                        name_obj = json.loads(raw) if raw.strip().startswith("{") else {}
-                        name_val = (name_obj.get("name") or "").strip()
-                    except Exception:
-                        name_val = ""
-
-            if not name_val:
-                name_val = "（待補正式名稱）"
-
-
-            st.setdefault("cms", {}).setdefault("pending_payload", {})["name"] = name_val
-            st["step"] = "f_philosophy"
+        # === C1) f_name
+        if session_mode and st.get("step") == "f_name":
+            text, st = await step_f_name(st, body.get("model"), base_url, timeout_s)
             write_state(sess_base, session_id, st)
+            append_history(session_id, "assistant", text, sess_base)
+            return (StreamingResponse(one_shot_ndjson(text)(), media_type="application/x-ndjson",
+                    headers={"Cache-Control":"no-cache","X-Accel-Buffering":"no","X-Session-Mode":"session"})
+                    if want_stream else JSONResponse({...}, headers={"X-Session-Mode":"session"}))
 
-            msg = f"暫定計畫名稱：{name_val}\n接著我會產生 120~180 字的『計畫理念』，沒問題請回「好」。"
-            append_history(session_id, "assistant", msg, sess_base)
+        # === C2) f_philosophy
+        if session_mode and st.get("step") == "f_philosophy":
+            text, st = await step_f_philosophy(st, body.get("model"), base_url, timeout_s)
+            write_state(sess_base, session_id, st)
+            append_history(session_id, "assistant", text, sess_base)
             if want_stream:
                 return StreamingResponse(one_shot_ndjson(msg)(),
                                         media_type="application/x-ndjson",
@@ -487,126 +178,11 @@ async def proxy_ollama_chat(request: Request):
                                     "done": True},
                                     headers={"X-Session-Mode":"session"})
 
-        # C2) 逐條：抓 philosophy
-        if st.get("step") == "f_philosophy":
-            plain = (st.get("cms") or {}).get("plain") or ""
-            system, user = prompt_philosophy(plain)
-            upstream_payload = {
-                "model": body.get("model"),
-                "stream": False,
-                "messages": [
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user},
-                ],
-            }
-            ok, txt = await ask_upstream_json(base_url, body.get("model"), [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ], timeout_s=settings.upstream_timeout_s,)
-
-            print("Debug: Upstream response for philosophy:", txt)
-
-            if not ok:
-                phil = ""  # 先給空字串，等清理與限長後也能跑下去
-            else:
-                try:
-                    data = json.loads(txt)
-                    raw = ((data.get("message") or {}).get("content")) or data.get("response") or txt
-                    phil_obj = json.loads(raw) if raw.strip().startswith("{") else {}
-                    phil = (phil_obj.get("philosophy") or "").strip()
-                except Exception:
-                    phil = ""
-
-            # 清理與限長（保留你原本這段）
-            from html import unescape as _un
-            import re as _re
-            phil = _un(_re.sub(r"\s+", " ", phil))
-            phil = _re.sub(r'\{\s*"page"\s*:\s*\d+[^}]*\}', "", phil)[:180].strip()
-
-            # 若仍為空，可放一個簡短 placeholder，避免前端以為沒完成
-            if not phil:
-                phil = "本計畫旨在推動在地發展與跨域合作，強化治理能力並提升公共價值。"
-
-
-            st.setdefault("cms", {}).setdefault("pending_payload", {})["philosophy"] = phil
-            # 下一步：先把現在的兩欄草稿給使用者看，等他說「好」再進 SDG（之後再加）
-            st["step"] = "f_sdg"
+        # === C3) f_sdg
+        if session_mode and st.get("step") == "f_sdg":
+            text, st = await step_f_sdg(st, body.get("model"), base_url, timeout_s)
             write_state(sess_base, session_id, st)
-
-            pretty = json.dumps(st["cms"]["pending_payload"], ensure_ascii=False)
-            msg = f"目前草稿（名稱＋理念）：\n{pretty}\n\n如果沒問題，可以回『好』；我會開始計算 SDGs 權重。"
-            append_history(session_id, "assistant", msg, sess_base)
-            if want_stream:
-                return StreamingResponse(one_shot_ndjson(msg)(),
-                                        media_type="application/x-ndjson",
-                                        headers={"Cache-Control":"no-cache","X-Accel-Buffering":"no","X-Session-Mode":"session"})
-            else:
-                return JSONResponse({"model": body.get("model"),
-                                    "message": {"role":"assistant","content": msg},
-                                    "done": True},
-                                    headers={"X-Session-Mode":"session"})
-
-        # C3) 逐條：抓 SDG（list_sdg + weight_description）
-        if st.get("step") == "f_sdg":
-            # 1) 保障 plain 來源（若 cms.plain 沒有，就從 parsed.json 摘要）
-            plain = (st.get("cms") or {}).get("plain") or ""
-            if not plain:
-                try:
-                    # 統一用模組前綴，避免同名變數陰影
-                    sess_dir = os.path.join(sess_base, session_id)
-                    plain = parsed_text_mod.extract_plaintext(sess_dir) or ""
-                    st.setdefault("cms", {})["plain"] = plain[:20000]
-                except Exception:
-                    plain = (plain or "")[:20000]
-
-            system, user = prompt_sdg(plain)
-
-            print("Debug: SDG prompt length:", len(user))
-
-            ok, txt = await ask_upstream_json(
-                base_url, body.get("model"),
-                [
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user},
-                ],
-                timeout_s=settings.upstream_timeout_s,
-            )
-
-            print("Debug: Upstream response for SDG:", txt)
-
-            # 2) 鬆綁解析：不管 txt 長怎樣先盡量撈 JSON
-            obj = parse_json_loose(txt if ok else "")
-            cand_ls = str(obj.get("list_sdg") or "").strip()
-            cand_wd = obj.get("weight_description") or {}
-
-            # 3) 規範化 list_sdg：27 位「0/1,」格式
-            bits = [b.strip() for b in cand_ls.split(",") if b.strip() != ""]
-            valid = (len(bits) == 27 and all(b in ("0","1") for b in bits))
-            if not valid:
-                bits = ["0"] * 27
-            list_sdg = ",".join(bits)
-
-            # 4) 保底：避免全 0 或描述為空（啟發式）
-            if all(b == "0" for b in bits) or not isinstance(cand_wd, dict) or not cand_wd:
-                fb = fallback_from_plaintext(plain)
-                list_sdg = fb.get("list_sdg", list_sdg)
-                cand_wd = fb.get("weight_description", cand_wd)
-
-
-            # 5) 回寫 payload
-            st.setdefault("cms", {}).setdefault("pending_payload", {})["list_sdg"] = list_sdg
-            st["cms"]["pending_payload"]["weight_description"] = cand_wd
-
-            # 6) 進 aligned、寫狀態
-            st["step"] = "aligned"
-            write_state(sess_base, session_id, st)
-
-            pretty = json.dumps(st["cms"]["pending_payload"], ensure_ascii=False)
-            msg = (
-                f"目前草稿（名稱＋理念＋SDG）：\n{pretty}\n\n"
-                "如果沒問題，可以回『上傳』；或跟我說要微調哪一欄。"
-            )
-            append_history(session_id, "assistant", msg, sess_base)
+            append_history(session_id, "assistant", text, sess_base)
             if want_stream:
                 return StreamingResponse(one_shot_ndjson(msg)(),
                                          media_type="application/x-ndjson",
@@ -618,78 +194,22 @@ async def proxy_ollama_chat(request: Request):
                                     headers={"X-Session-Mode":"session"})
 
 
-        # D) aligned：等使用者指令「上傳」→ 送出 CMS
-        if st.get("step") in ("aligned", "aligned_with_warnings"):
+        # === D) aligned：等上傳
+        if session_mode and st.get("step") in ("aligned", "aligned_with_warnings"):
             user_text = _get_last_user_text(messages) or ""
-            want_upload = bool(UPLOAD_RE.search(user_text) or YES_RE.search(user_text))  # ← 新增：接受「好」
-
+            want_upload = bool(UPLOAD_RE.search(user_text) or YES_RE.search(user_text))
             if not want_upload:
-                # 還沒說要上傳，就提示
-                tip = "若看起來沒問題，回覆「上傳」或「好」我就會送到永續系統。"
-                append_history(session_id, "assistant", tip, sess_base)
-                if want_stream:
-                    return StreamingResponse(one_shot_ndjson(tip)(),
-                                            media_type="application/x-ndjson",
-                                            headers={"Cache-Control":"no-cache","X-Accel-Buffering":"no","X-Session-Mode":"session"})
-                else:
-                    return JSONResponse({"model": body.get("model"),
-                                        "message": {"role":"assistant","content": tip},
-                                        "done": True},
-                                        headers={"X-Session-Mode":"session"})
-
-            # 真的要上傳
-            pending = ((st.get("cms") or {}).get("pending_payload")) or {}
-            if not pending:
-                msg = "找不到待上傳的參數，請再說「好」讓我重新產生一次。"
-                append_history(session_id, "assistant", msg, sess_base)
-                if want_stream:
-                    return StreamingResponse(one_shot_ndjson(msg)(),
-                                            media_type="application/x-ndjson",
-                                            headers={"Cache-Control":"no-cache","X-Accel-Buffering":"no","X-Session-Mode":"session"})
-                else:
-                    return JSONResponse({"model": body.get("model"),
-                                        "message": {"role":"assistant","content": msg},
-                                        "done": True},
-                                        headers={"X-Session-Mode":"session"})
-
-            # 送到 CMS
-            pending = validate_and_fix_payload(pending or {})
-            status_code, data, raw = await post_cms_upload(pending)
-
-            if 200 <= status_code < 300:
-                uuid = data.get("uuid") or data.get("id") or ""
-                st["step"] = "uploaded"
-                st.setdefault("cms", {})["uuid"] = uuid
-                write_state(sess_base, session_id, st)
-
-                url = f"https://nsdgs.4impact.cc/content/{uuid}" if uuid else ""
-                msg = (
-                    f"✅ 已上傳到永續系統。專案編號：{uuid or '（未回傳編號）'}"
-                    + (f"\n連結：{url}" if uuid else "")
-                )
-                append_history(session_id, "assistant", msg, sess_base)
-                if want_stream:
-                    return StreamingResponse(one_shot_ndjson(msg)(),
-                                            media_type="application/x-ndjson",
-                                            headers={"Cache-Control":"no-cache","X-Accel-Buffering":"no","X-Session-Mode":"session"})
-                else:
-                    return JSONResponse({"model": body.get("model"),
-                                        "message": {"role":"assistant","content": msg},
-                                        "done": True},
-                                        headers={"X-Session-Mode":"session"})
+                text = prompt_aligned_tip()
+                append_history(session_id, "assistant", text, sess_base)
+            if want_stream:
+                return StreamingResponse(one_shot_ndjson(msg)(),
+                                        media_type="application/x-ndjson",
+                                        headers={"Cache-Control":"no-cache","X-Accel-Buffering":"no","X-Session-Mode":"session"})
             else:
-                # 失敗：把 raw 訊息附上方便除錯
-                msg = f"❌ 上傳失敗 (HTTP {status_code})。"
-                append_history(session_id, "assistant", msg, sess_base)
-                if want_stream:
-                    return StreamingResponse(one_shot_ndjson(msg)(),
-                                            media_type="application/x-ndjson",
-                                            headers={"Cache-Control":"no-cache","X-Accel-Buffering":"no","X-Session-Mode":"session"})
-                else:
-                    return JSONResponse({"model": body.get("model"),
-                                        "message": {"role":"assistant","content": msg},
-                                        "done": True},
-                                        headers={"X-Session-Mode":"session"})
+                return JSONResponse({"model": body.get("model"),
+                                    "message": {"role":"assistant","content": msg},
+                                    "done": True},
+                                    headers={"X-Session-Mode":"session"})
 
 
 
