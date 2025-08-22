@@ -21,7 +21,8 @@ from app.flows.doc_flow import (
     prepare_aligning, prompt_aligned_tip, handle_upload
 )
 from app.flows.fields_flow import step_f_name, step_f_philosophy, step_f_sdg
-from app.core.regexes import YES_RE, UPLOAD_RE  # 若上面已引入，可保留
+from app.core.regexes import YES_RE, UPLOAD_RE
+from app.core.streaming import proxy_streaming
 
 router = APIRouter(prefix="/api", tags=["chat"])
 
@@ -246,132 +247,19 @@ async def proxy_ollama_chat(request: Request):
                 content=json.loads(txt) if txt else {},
                 headers={"X-Session-Mode": "session" if session_mode else "stateless"},
             )
-
-        # 串流
-        resp = await session.post(
-            f"{base_url}/api/chat",
-            data=payload_bytes,
-            headers={"Content-Type": "application/json","Accept-Encoding": "identity"},
-            allow_redirects=False,
+        # ===== 串流 =====
+        return await proxy_streaming(
+            request,
+            base_url,
+            payload_bytes,
+            session_mode=session_mode,
+            session_id=session_id,
+            deny_enabled=deny_enabled,
+            deny_guard=deny_guard,
+            refusal_text=refusal_text,
+            append_history_fn=append_history,
+            sess_base=sess_base,
         )
-
-        if resp.status >= 400:
-            err = await resp.read()
-            await resp.release()
-            await session.close()
-            return JSONResponse(status_code=resp.status, content={"error": err.decode("utf-8","ignore")})
-
-        async def gen():
-            got_any = False
-            linebuf = ""
-            assistant_buffer = []
-            try:
-                async for chunk in resp.content.iter_chunked(8192):
-                    got_any = True
-                    if await request.is_disconnected():
-                        break
-                    if not chunk:
-                        continue
-                    piece = chunk.decode("utf-8", "ignore")
-                    linebuf += piece
-
-                    while True:
-                        i = linebuf.find("\n")
-                        if i < 0: break
-                        line = linebuf[:i]; linebuf = linebuf[i+1:]
-                        ls = line.strip()
-
-                        # 串流中政策過濾
-                        if deny_enabled and deny_guard and ls.startswith("{"):
-                            try:
-                                obj = json.loads(ls)
-                                content = ((obj.get("message") or {}).get("content")) or ""
-                                if content and session_mode: assistant_buffer.append(content)
-                                hit, _, _ = deny_guard.test_text(content or "")
-                                if hit:
-                                    try: await resp.release()
-                                    except: pass
-                                    try: await session.close()
-                                    except: pass
-                                    if session_mode:
-                                        append_history(session_id, "assistant", refusal_text, sess_base)
-                                    yield ndjson_line({"message":{"role":"assistant","content":refusal_text},"done":False})
-                                    yield ndjson_line({"done": True})
-                                    return
-                            except Exception:
-                                pass
-                        else:
-                            try:
-                                obj = json.loads(ls)
-                                content = ((obj.get("message") or {}).get("content")) or ""
-                                if content and session_mode: assistant_buffer.append(content)
-                            except Exception:
-                                pass
-
-                        yield (line + "\n").encode("utf-8")
-                        await asyncio.sleep(0)
-
-                if linebuf:
-                    ls = linebuf.strip()
-                    if deny_enabled and deny_guard and ls.startswith("{"):
-                        try:
-                            obj = json.loads(ls)
-                            content = ((obj.get("message") or {}).get("content")) or ""
-                            if content and session_mode: assistant_buffer.append(content)
-                            hit, _, _ = deny_guard.test_text(content or "")
-                            if hit:
-                                try: await resp.release()
-                                except: pass
-                                try: await session.close()
-                                except: pass
-                                if session_mode:
-                                    append_history(session_id, "assistant", refusal_text, sess_base)
-                                yield ndjson_line({"message":{"role":"assistant","content":refusal_text},"done":False})
-                                yield ndjson_line({"done": True})
-                                return
-                        except Exception:
-                            pass
-                    yield (linebuf + ("\n" if not linebuf.endswith("\n") else "")).encode("utf-8")
-
-            except Exception as e:
-                if not got_any:
-                    try: await resp.release()
-                    except: pass
-                    try: await session.close()
-                    except: pass
-                    fake = await _fake_stream_from_full(payload_bytes, base_url)
-                    async for c in fake():
-                        try:
-                            obj = json.loads(c.decode("utf-8"))
-                            content = ((obj.get("message") or {}).get("content")) or ""
-                            if content and session_mode: assistant_buffer.append(content)
-                        except Exception:
-                            pass
-                        yield c
-                else:
-                    yield b'{"done": true}\n'
-            finally:
-                if session_mode and assistant_buffer:
-                    try:
-                        append_history(session_id, "assistant", "".join(assistant_buffer), sess_base)
-                    except Exception:
-                        pass
-                try: await resp.release()
-                except: pass
-                try: await session.close()
-                except: pass
-
-        headers = {"Cache-Control": "no-cache","X-Accel-Buffering": "no","X-Session-Mode": "session" if session_mode else "stateless"}
-        if hit_cat:
-            headers["X-Policy-Blocked"] = hit_cat
-            headers["X-Policy-Triggered"] = "pre"
-
-        return StreamingResponse(gen(), media_type=resp.headers.get("Content-Type", "application/x-ndjson"), headers=headers)
-
-    except Exception:
-        try: await session.close()
-        except: pass
-        fake = await _fake_stream_from_full(payload_bytes, base_url)
-        return StreamingResponse(fake(), media_type="application/x-ndjson",
-                                 headers={"Cache-Control":"no-cache","X-Accel-Buffering":"no",
-                                          "X-Session-Mode":"session" if session_mode else "stateless"})
+    except RuntimeError as e:
+        # 上游回 4xx/5xx 的情況（proxy_streaming raise）
+        return JSONResponse(status_code=500, content={"error": str(e)})
