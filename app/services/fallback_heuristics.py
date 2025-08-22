@@ -104,7 +104,5 @@ def fallback_from_parsed_clip(parsed_clip: str) -> Dict[str, Any]:
         "list_sdg": ",".join(bits),
         "weight_description": desc
     }
-    # 保留 debug（可改為 logger 之後再統一）
-    print("Debug: Fallback upload payload:", json.dumps(result, ensure_ascii=False, indent=2))
     return result
 

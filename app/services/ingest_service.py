@@ -1,6 +1,7 @@
 # app/services/ingest_service.py
 from pathlib import Path
 from app.session_utils import append_history
+from app.logger import logger
 
 def parse_first_pdf_and_write(session_id: str, base_dir: Path, sess_base: Path, state_store, model: str = "project") -> dict:
     # 延遲載入，避免啟動就吃 heavy 依賴
@@ -21,7 +22,7 @@ def parse_first_pdf_and_write(session_id: str, base_dir: Path, sess_base: Path, 
         pending_fields = list_required_fields(base_dir, model=model)
     except Exception as e:
         pending_fields = []
-        print("[state] list_required_fields error:", e)
+        logger.error("[state] list_required_fields error:", e)
 
     # 更新 state
     try:
@@ -32,7 +33,7 @@ def parse_first_pdf_and_write(session_id: str, base_dir: Path, sess_base: Path, 
             pending_fields=pending_fields,
         )
     except Exception as e:
-        print("[state] mark_parsed error:", e)
+        logger.error("[state] mark_parsed error:", e)
 
     # 系統訊息
     try:

@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
+from app.logger import logger
 
 from app.state_store import ConversationStateStore
 from app.core.config import load_settings
@@ -58,7 +59,7 @@ async def on_startup():
 
     guard, summary, err = load_deny_guard(app.state.denylist_path)
     app.state.deny_guard = guard
-    print(
+    logger.info(
         f"[policy] loaded {app.state.denylist_path}: {summary}"
         if guard else f"[policy] load failed: {err}",
         "enabled=", app.state.deny_enabled,
