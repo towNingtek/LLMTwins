@@ -61,11 +61,12 @@ async def on_startup():
 
     guard, summary, err = load_deny_guard(app.state.denylist_path)
     app.state.deny_guard = guard
-    logger.info(
+    prefix = (
         f"[policy] loaded {app.state.denylist_path}: {summary}"
-        if guard else f"[policy] load failed: {err}",
-        "enabled=", app.state.deny_enabled,
+        if guard else f"[policy] load failed: {err}"
     )
+    logger.info(f"{prefix} | enabled={app.state.deny_enabled}")
+
 
 # ============================================================================
 # Health Check & Root
