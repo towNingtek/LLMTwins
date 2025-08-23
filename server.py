@@ -15,6 +15,7 @@ from app.routers.sessions import router as sessions_router
 from app.routers.debug import router as debug_router
 from app.routers.admin import router as admin_router
 from app.routers.chat import router as chat_router
+from app.routers.pipeline import router as pipeline_router   # ← 新增
 
 # ============================================================================
 # Configuration & Initialization
@@ -43,6 +44,7 @@ app.include_router(sessions_router)
 app.include_router(debug_router)
 app.include_router(admin_router)
 app.include_router(chat_router)
+app.include_router(pipeline_router)  # ← 新增
 
 # ============================================================================
 # Startup: inject shared state & load policy
