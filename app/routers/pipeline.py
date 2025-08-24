@@ -138,3 +138,39 @@ async def api_cms_upload(request: Request, body: Dict[str, Any] = Body(...)):
         raise HTTPException(status_code=502, detail={"reason": "missing uuid", "data": data, "raw": raw})
 
     return {"uuid": uuid, "raw": raw}
+
+@router.post("/sessions/{session_id}/pipeline/one_click")
+async def api_one_click_pipeline(session_id: str, request: Request, body: Dict[str, Any] = Body(None)):
+    """
+    一鍵：讀 parsed.json → 產生 payload（優先 LLM，失敗走 fallback）→ 上傳 CMS → 回傳 uuid + 連結
+    """
+    settings = request.app.state.settings
+
+    # 讀 state 與 parsed.json
+    st = read_state(settings.sess_base, session_id) or {}
+    st.setdefault("session_id", session_id)
+    st.setdefault("sess_base", settings.sess_base)
+
+    plain = extract_plaintext(settings.sess_base, session_id, max_chars=20000)
+
+    # 產生 payload（先試正式 LLM，失敗則 fallback）
+    try:
+        from app.flows.fields_flow import build_cms_payload  # 若尚未實作會 ImportError
+        payload = await build_cms_payload(st=st, plain=plain)
+        if not isinstance(payload, dict):
+            raise ValueError("payload must be dict")
+    except Exception:
+        # 用我們已有的 fallback（同檔內定義的 _naive_build_payload）
+        payload = _naive_build_payload(plain or "")
+
+    # 上傳 CMS
+    status, data, raw = await post_cms_upload(payload, settings.cms_upload_url)
+    if status >= 400:
+        raise HTTPException(status_code=status, detail=data or {"raw": raw})
+
+    uuid = (data or {}).get("uuid")
+    if not uuid:
+        raise HTTPException(status_code=502, detail={"reason": "missing uuid", "data": data, "raw": raw})
+
+    cms_link = f"https://nsdgs.4impact.cc/content/{uuid}"
+    return {"uuid": uuid, "cmsLink": cms_link}
