@@ -357,10 +357,11 @@ CMS_PAYLOAD=$(cat << EOF
   "philosophy": "$SAFE_PHIL",
   "budget": $EXTRACTED_BUDGET,
   "org": "南投縣政府",
-  "hoster_email": "contact@county.gov.tw",
+  "hoster_email": "minamj@nantou.gov.tw",
   "list_sdg": "$EXTRACTED_LIST_SDG",
   "weight_description": $SAFE_WEIGHT_DESC,
-  "is_budget_revealed": true
+  "is_budget_revealed": true,
+  "project_type": "0"
 }
 EOF
 )

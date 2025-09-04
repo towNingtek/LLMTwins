@@ -3,10 +3,13 @@ from typing import Any, Dict, Tuple
 from fastapi import APIRouter, Request, Body, HTTPException
 import re
 from datetime import date
+from app.logger import logger
 
 from app.services.parsed_reader import extract_plaintext
 from app.services.state_utils import read_state
 from app.services.cms_uploader import post_cms_upload
+from app.flows.fields_flow import build_cms_payload
+from app.flows.claude_port import build_integrated_fields
 
 router = APIRouter(prefix="/api", tags=["pipeline"])
 
@@ -81,43 +84,49 @@ def _naive_build_payload(plain: str) -> Dict[str, Any]:
         "philosophy": (plain[:380] + "…") if plain and len(plain) > 400 else (plain or "本計畫旨在提升地方永續發展能量。"),
         "budget": budget,
         "org": "南投縣政府",
-        "hoster_email": "contact@county.gov.tw",
+        "hoster_email": "minamj@nantou.gov.tw",
         "list_sdg": list_sdg,
         "weight_description": _default_weight_desc(),
         "is_budget_revealed": True,
+        "project_type": "0"
     }
 
 # ---------------------------------------------------------------------------
 
 @router.post("/integrated_fields")
 async def api_integrated_fields(request: Request, body: Dict[str, Any] = Body(...)):
-    """
-    讀取 session 的 parsed.json → 產生 CMS payload
-    回傳: {"payload": {...}}
-    """
     settings = request.app.state.settings
     session_id = request.query_params.get("session_id")
     if not session_id:
         raise HTTPException(status_code=400, detail="missing session_id")
 
-    # 讀取 state 與 parsed.json
+    # 讀 state 與 parsed.json
     st = read_state(settings.sess_base, session_id) or {}
-    st.setdefault("session_id", session_id)
-    st.setdefault("sess_base", settings.sess_base)
+    # ★ 把 settings 放進 st，build_cms_payload 會用到
+    st.update({"session_id": session_id, "sess_base": settings.sess_base, "settings": settings})
 
     plain = extract_plaintext(settings.sess_base, session_id, max_chars=20000)
 
-    # 先嘗試正式的 LLM 方法（如果你已經實作 build_cms_payload）
+    # 先走 LLM，失敗才落回你原本的 naive 規則
+    source = "fallback"
     try:
-        from app.flows.fields_flow import build_cms_payload  # 如未實作會 ImportError
-        payload = await build_cms_payload(st=st, plain=plain)
+        # ① 優先走「shell 等價版」
+        payload = await build_integrated_fields(settings=settings, full_text=plain)
         if not isinstance(payload, dict):
             raise ValueError("payload must be dict")
-        return {"payload": payload}
-    except Exception:
-        # fallback：用 naive 規則先讓前後端流程跑通
-        payload = _naive_build_payload(plain or "")
-        return {"payload": payload}
+        source = "shell-port"
+    except Exception as e:
+        logger.exception("[integrated_fields] shell-port failed, try fields_flow: %s", e)
+        try:
+            # ② 退回你先前的 LLM 版
+            payload = await build_cms_payload(st=st, plain=plain)
+            source = "llm"
+        except Exception as e2:
+            logger.exception("[integrated_fields] fields_flow failed, use naive: %s", e2)
+            payload = _naive_build_payload(plain or "")
+            source = "naive"
+
+    return {"payload": payload, "source": source}
 
 @router.post("/cms/upload")
 async def api_cms_upload(request: Request, body: Dict[str, Any] = Body(...)):
@@ -141,29 +150,59 @@ async def api_cms_upload(request: Request, body: Dict[str, Any] = Body(...)):
 
 @router.post("/sessions/{session_id}/pipeline/one_click")
 async def api_one_click_pipeline(session_id: str, request: Request, body: Dict[str, Any] = Body(None)):
-    """
-    一鍵：讀 parsed.json → 產生 payload（優先 LLM，失敗走 fallback）→ 上傳 CMS → 回傳 uuid + 連結
-    """
     settings = request.app.state.settings
 
-    # 讀 state 與 parsed.json
     st = read_state(settings.sess_base, session_id) or {}
-    st.setdefault("session_id", session_id)
-    st.setdefault("sess_base", settings.sess_base)
+    st.update({"session_id": session_id, "sess_base": settings.sess_base, "settings": settings})
 
     plain = extract_plaintext(settings.sess_base, session_id, max_chars=20000)
 
-    # 產生 payload（先試正式 LLM，失敗則 fallback）
+    # === 調試：比對 API 的 plain 與 sessions/<SID>/artifacts/parsed.json 是否一致 ===
+    import os, json, hashlib
+    from pathlib import Path
+
     try:
-        from app.flows.fields_flow import build_cms_payload  # 若尚未實作會 ImportError
-        payload = await build_cms_payload(st=st, plain=plain)
+        # 1) API 實際傳入的 plain 正規化 + 截前 2500 算 hash
+        norm_plain = re.sub(r"\s+", " ", (plain or "").strip())
+        api_head = norm_plain[:160]
+        api_hash = hashlib.sha256(norm_plain[:2500].encode("utf-8")).hexdigest()
+
+        # 2) 讀 session 檔案（你認為應該要吃的那份）
+        sess_parsed = Path(settings.sess_base) / session_id / "artifacts" / "parsed.json"
+        file_hash = "NA"
+        file_head = ""
+        if sess_parsed.exists():
+            pj = json.loads(sess_parsed.read_text(encoding="utf-8"))
+            pages = pj.get("pages") or []
+            merged = " ".join(re.sub(r"\s+", " ", (p.get("text") or "").strip()) for p in pages)
+            file_head = merged[:160]
+            file_hash = hashlib.sha256(merged[:2500].encode("utf-8")).hexdigest()
+        else:
+            logger.info("[integrated_fields] WARN parsed.json not found: %s", str(sess_parsed))
+
+        logger.info("[integrated_fields] INPUT api_hash=%s file_hash=%s", api_hash[:16], file_hash[:16])
+        logger.info("[integrated_fields] INPUT api_head=%s", api_head)
+        logger.info("[integrated_fields] INPUT file_head=%s", file_head)
+    except Exception as dbg_e:
+        logger.info("[integrated_fields] DEBUG input compare failed: %s", dbg_e)
+
+
+    source = "fallback"
+    try:
+        payload = await build_integrated_fields(settings=settings, full_text=plain)
         if not isinstance(payload, dict):
             raise ValueError("payload must be dict")
-    except Exception:
-        # 用我們已有的 fallback（同檔內定義的 _naive_build_payload）
-        payload = _naive_build_payload(plain or "")
+        source = "shell-port"
+    except Exception as e:
+        logger.exception("[one_click] shell-port failed, try fields_flow: %s", e)
+        try:
+            payload = await build_cms_payload(st=st, plain=plain)
+            source = "llm"
+        except Exception as e2:
+            logger.exception("[one_click] fields_flow failed, use naive: %s", e2)
+            payload = _naive_build_payload(plain or "")
+            source = "naive"
 
-    # 上傳 CMS
     status, data, raw = await post_cms_upload(payload, settings.cms_upload_url)
     if status >= 400:
         raise HTTPException(status_code=status, detail=data or {"raw": raw})
@@ -173,4 +212,4 @@ async def api_one_click_pipeline(session_id: str, request: Request, body: Dict[s
         raise HTTPException(status_code=502, detail={"reason": "missing uuid", "data": data, "raw": raw})
 
     cms_link = f"https://nsdgs.4impact.cc/content/{uuid}"
-    return {"uuid": uuid, "cmsLink": cms_link}
+    return {"uuid": uuid, "cmsLink": cms_link, "source": source}

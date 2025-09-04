@@ -15,7 +15,8 @@ from app.routers.sessions import router as sessions_router
 from app.routers.debug import router as debug_router
 from app.routers.admin import router as admin_router
 from app.routers.chat import router as chat_router
-from app.routers.pipeline import router as pipeline_router   # ← 新增
+from app.routers.pipeline import router as pipeline_router
+from app.routers import chat_demo
 
 # ============================================================================
 # Configuration & Initialization
@@ -31,20 +32,33 @@ app = FastAPI()
 BASE_DIR = Path(__file__).resolve().parent
 app.state.settings = load_settings(BASE_DIR)
 
+from fastapi.middleware.cors import CORSMiddleware
+
+ALLOWED_ORIGINS = [
+    "https://nsdgs.4impact.cc",   # 前端正式站
+    "https://eva.4impact.cc",     # 你 configs 也有
+    "http://localhost:3000",      # 本機開發 (React)
+    "http://localhost:5173",      # 本機開發 (Vite)
+    "http://127.0.0.1:5173",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,  # ⭐ 必須關掉
-    allow_methods=["*"],
+    allow_origins=ALLOWED_ORIGINS,     # 不用 "*"，一些反代和預檢轉址時會掉 header
+    allow_credentials=False,           # 你目前沒用 cookie，維持 False
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
+    max_age=86400,
 )
+
 
 # 掛上 routers
 app.include_router(sessions_router)
 app.include_router(debug_router)
 app.include_router(admin_router)
 app.include_router(chat_router)
-app.include_router(pipeline_router)  # ← 新增
+app.include_router(pipeline_router)
+app.include_router(chat_demo.router)
 
 # ============================================================================
 # Startup: inject shared state & load policy

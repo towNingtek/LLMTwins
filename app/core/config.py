@@ -21,7 +21,7 @@ class Settings:
         "https://eva.4impact.cc",
         "http://localhost:3000",
         "http://localhost:5173",
-        "http://nsdgs.4impact.cc",
+        "https://nsdgs.4impact.cc",
     ])
 
     # ==== 本步驟新增（Step 2 需要）====
@@ -30,6 +30,11 @@ class Settings:
         "CMS_UPLOAD_URL", "https://beta-tplanet-backend.4impact.cc/projects/upload"
     ))
     accept_encoding_identity: str = "identity"  # 一致化 header
+
+    # ==== 抽取模型 & 自身 Base（可選）====
+    fields_model: str = field(default_factory=lambda: os.getenv("FIELDS_MODEL", "qwen2.5:7b-instruct"))
+    self_base_url: str = field(default_factory=lambda: os.getenv("SELF_BASE_URL", ""))  # 若想優先走自己的 /api/chat，可在 .env 設
+
 
 def load_settings(base_dir: Path) -> Settings:
     s = Settings(base_dir=base_dir)

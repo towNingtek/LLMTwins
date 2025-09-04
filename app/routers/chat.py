@@ -247,23 +247,65 @@ async def proxy_ollama_chat(request: Request):
                 data=payload_bytes,
                 headers={"Content-Type": "application/json", "Accept-Encoding": "identity"},
             )
-            txt = await resp.text()
+            upstream_txt = await resp.text()
             await resp.release()
             await session.close()
 
+            # 先嘗試把上游當 JSON 直接轉回給前端
+            try:
+                upstream_json = json.loads(upstream_txt)
+            except Exception:
+                upstream_json = None
+
+            # session 模式下，把助理回覆寫入歷史
             if session_mode:
                 try:
-                    data = json.loads(txt)
-                    content = ((data.get("message") or {}).get("content")) or data.get("response") or ""
+                    if upstream_json and isinstance(upstream_json, dict):
+                        content_for_history = ((upstream_json.get("message") or {}).get("content")) \
+                                              or upstream_json.get("response") or ""
+                    else:
+                        content_for_history = upstream_txt
+                    if content_for_history:
+                        append_history(session_id, "assistant", content_for_history, sess_base)
                 except Exception:
-                    content = ""
-                if content:
-                    append_history(session_id, "assistant", content, sess_base)
+                    pass
 
+            if upstream_json:
+                # 上游就是合法 JSON → 原封不動回傳
+                return JSONResponse(
+                    content=upstream_json,
+                    headers={"X-Session-Mode": "session" if session_mode else "stateless"},
+                )
+
+            # 上游不是合法 JSON → 依 request 的 response_format 合成包裝
+            rf = (body.get("response_format") or {}).get("type")
+            raw = (upstream_txt or "").strip()
+
+            if rf == "json_object":
+                # 盡力從上游純文字中撈出第一段 JSON
+                if raw:
+                    try:
+                        content_obj = json.loads(raw)
+                    except Exception:
+                        from app.services.json_parse import extract_first_json
+                        s = extract_first_json(raw)
+                        content_obj = json.loads(s) if s else {}
+                else:
+                    content_obj = {}
+            else:
+                # 非 json_object → 當成一般純文字
+                content_obj = raw
+
+            envelope = {
+                "model": body.get("model"),
+                "message": {"role": "assistant", "content": content_obj},
+                "done": True,
+            }
             return JSONResponse(
-                content=json.loads(txt) if txt else {},
+                content=envelope,
                 headers={"X-Session-Mode": "session" if session_mode else "stateless"},
             )
+
 
         # Streaming
         return await proxy_streaming(
