@@ -41,7 +41,7 @@ def prepare_aligning(st: Dict[str, Any], sess_base, session_id: str) -> Tuple[st
         st["cms"] = {}
     plain = extract_plaintext(sess_base, session_id, max_chars=3000)
     st["cms"]["pending_payload"] = {
-        "email": "forus999@gmail.com",
+        "email": "minamj@nantou.gov.tw",
         "project_start_date": "2025-01-01",
         "project_due_date":   "2025-12-31",
         "list_sdg": ",".join(["0"]*27),

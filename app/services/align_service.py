@@ -16,7 +16,7 @@ def load_parsed_clip(sess_base: str, session_id: str, max_chars: int = MAX_CHARS
     return _clip_text(raw, max_chars), json.loads(raw)
 
 def build_upload_prompt(parsed_clip: str,
-                        fixed_email: str = "forus999@gmail.com",
+                        fixed_email: str = "minamj@nantou.gov.tw",
                         current_year: int = None) -> str:
     from datetime import datetime
     year = current_year or datetime.now().year

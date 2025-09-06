@@ -77,7 +77,7 @@ def _naive_build_payload(plain: str) -> Dict[str, Any]:
     start, end = _find_dates(plain)
     list_sdg = _build_list_sdg()
     return {
-        "email": "minamj@nantou.gov.tw",
+        "email": "forus999@gmail.com",
         "name": name,
         "project_start_date": start,
         "project_due_date": end,

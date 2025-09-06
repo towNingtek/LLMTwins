@@ -350,7 +350,7 @@ SAFE_WEIGHT_DESC="$EXTRACTED_WEIGHT_DESC"
 # 使用 printf 和 here document 構建 JSON
 CMS_PAYLOAD=$(cat << EOF
 {
-  "email": "forus999@gmail.com",
+  "email": "minamj@nantou.gov.tw",
   "name": "$SAFE_NAME",
   "project_start_date": "$EXTRACTED_START_DATE",
   "project_due_date": "$EXTRACTED_END_DATE", 

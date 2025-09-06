@@ -1,6 +1,6 @@
 curl -X POST 'https://beta-tplanet-backend.4impact.cc/projects/upload' \
   -H 'Content-Type: application/x-www-form-urlencoded' \
-  --data-urlencode 'email=forus999@gmail.com' \
+  --data-urlencode 'email=minamj@nantou.gov.tw' \
   --data-urlencode 'name=南投縣數位通服務整備計畫' \
   --data-urlencode 'project_start_date=2025-01-01' \
   --data-urlencode 'project_due_date=2025-12-31' \

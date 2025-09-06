@@ -4,6 +4,7 @@ import json, re, os, time, logging
 from typing import Any, Dict, Tuple, Optional
 from datetime import date
 import httpx
+from app.flows.emergency_fix import _classify_sdgs_fixed, _extract_budget_enhanced
 
 # 盡量沿用你的 logger，如無則使用標準 logging
 try:
@@ -145,9 +146,6 @@ def _sdg_slice(full: str) -> str:
     # shell: pages[].text | head -c 2500 | normalize
     return _head(_s(full), 2500)
 
-# =========================
-# /api/chat 串流（等價 curl -N）
-# =========================
 async def _post_chat_stream_content(settings, system_prompt: str, user_prompt: str,
                                     *, temperature: float, max_tokens: int,
                                     top_p: Optional[float]=None,
@@ -159,7 +157,7 @@ async def _post_chat_stream_content(settings, system_prompt: str, user_prompt: s
     model = getattr(settings, "fields_model", "") or os.getenv("FIELDS_MODEL", "qwen2.5:7b-instruct")
     base = getattr(settings, "self_base_url", "") or os.getenv("SELF_BASE_URL", "")
 
-    logger.info("[fields] using model=%s base=%s", model, (getattr(settings, "self_base_url", "") or os.getenv("SELF_BASE_URL", "")) or "(ollama-fallback)")
+    logger.info("Hello using model=%s base=%s", model, (getattr(settings, "self_base_url", "") or os.getenv("SELF_BASE_URL", "")) or "(ollama-fallback)")
 
     if not base:
         # 回落：Ollama OpenAI 相容端點（非 streaming）
@@ -169,6 +167,8 @@ async def _post_chat_stream_content(settings, system_prompt: str, user_prompt: s
             auth = getattr(settings, "ollama_auth", None) or os.getenv("OLLAMA_AUTH")
             if auth:
                 headers["Authorization"] = f"Bearer {auth}"
+            logger.info("Hello fallback to ollama url=%s", url)
+
             async with httpx.AsyncClient(timeout=timeout_s) as client:
                 r = await client.post(url, headers=headers, json={
                     "model": model,
@@ -183,8 +183,10 @@ async def _post_chat_stream_content(settings, system_prompt: str, user_prompt: s
                 })
                 r.raise_for_status()
                 out = r.json()
+                logger.info("Hello ollama response=%s", out)
                 return (out.get("choices") or [{}])[0].get("message", {}).get("content", "") or ""
-        except Exception:
+        except Exception as e:
+            logger.info("Hello ollama exception=%s", e)
             return ""
 
     url = base.rstrip("/") + "/api/chat"
@@ -197,6 +199,7 @@ async def _post_chat_stream_content(settings, system_prompt: str, user_prompt: s
             {"role": "user", "content": user_prompt},
         ],
     }
+    logger.info("Hello streaming url=%s payload=%s", url, payload)
 
     buf = []
     headers = {"Content-Type": "application/json", "Accept-Encoding": "identity"}
@@ -206,20 +209,25 @@ async def _post_chat_stream_content(settings, system_prompt: str, user_prompt: s
                 if not raw:
                     continue
                 line = raw.strip()
+                logger.info("Hello raw line=%s", line[:200])  # 限制長度避免爆掉
                 # 容忍 SSE "data: {...}" 前綴
                 if line.startswith("data:"):
                     line = line[5:].strip()
-                # 等價 shell: 只處理看起來是 JSON 的行
                 if not (line.startswith("{") and line.endswith("}")):
                     continue
                 try:
                     obj = json.loads(line)
                     msg = (obj.get("message") or {}).get("content") or ""
+                    logger.info("Hello parsed msg=%s", msg[:200])
                     if msg:
                         buf.append(msg)
-                except Exception:
+                except Exception as e:
+                    logger.info("Hello json parse error=%s", e)
                     continue
-    return "".join(buf)
+    result = "".join(buf)
+    logger.info("Hello final result=%s", result[:500])  # 最後結果也印
+    return result
+
 
 # =========================
 # 5 段抽取（完全等價 prompts 與流程）
@@ -358,30 +366,36 @@ async def _generate_philosophy(settings, full: str, name: str) -> str:
         out = out[:180]
     return out
 
+# 在你的 claude_port.py 中，直接替換：
 async def _classify_sdgs(settings, full: str) -> Tuple[str, Dict[str, str]]:
+    return await _classify_sdgs_fixed(settings, full)  # 使用修復版
+
+async def _classify_sdgs1(settings, full: str) -> Tuple[str, Dict[str, str]]:
     SYSTEM_PROMPT = (
-        "你是 SDGs 分類專家，需要分析政府計畫並判斷其對應的永續發展目標。\n\n"
-        "SDGs 對應表（只需要前17個）：\n位置 1-17: SDG1-SDG17 (聯合國永續發展目標)\n位置 18-27: 設為 0 (不使用)\n\n"
-        "SDGs 對應說明：\n"
-        "- SDG4 (教育): 教育創新、數位素養、人才培育、國際交流學習\n"
-        "- SDG8 (就業): 經濟成長、就業機會、產業發展、國際商務\n"
-        "- SDG11 (城市): 永續城市、社區發展、國際友善城市、基礎設施\n"
-        "- SDG17 (夥伴): 國際合作、跨域合作、夥伴關係、兩岸事務\n\n"
-        "本土指標說明：\n- 位置 18-27: 全部設為 0 (此系統不使用)\n\n"
-        "任務：\n1. 仔細分析計畫內容\n2. 判斷哪些 SDGs 高度相關 (設為1)\n3. 為相關的 SDGs 寫 30-50 字的權重描述\n\n"
-        "輸出格式（必須包含完整27個位置）：\n"
-        '{\n  "list_sdg": "0,0,0,1,0,0,0,1,0,0,1,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0",\n'
-        '  "weight_description": {\n'
-        '    "4": "透過國際交流促進教育創新與人才培育",\n'
-        '    "8": "推動產業發展創造經濟機會與就業",\n'
-        '    "11": "建設永續發展的國際友善城市",\n'
-        '    "17": "建立國際夥伴關係促進跨域合作"\n'
-        "  }\n}\n\n"
-        "重要：\n1. list_sdg 必須包含完整27個數字（用逗號分隔）\n"
-        "2. 位置1-17：選擇相關的SDGs設為1\n3. 位置18-27：必須全部設為0\n"
-        "4. 這個計畫應該對應：SDG4(教育), SDG8(經濟), SDG11(城市), SDG17(夥伴)\n\n"
-        "重要：只輸出純 JSON，不要解釋。"
+        "你是一個嚴格的 SDGs 分類器，任務是將政府計畫文本對應到 SDG1~SDG17。\n\n"
+        "【輸出規則】\n"
+        "1) 永遠輸出合法 JSON，**不得輸出任何解釋或文字**。\n"
+        "2) JSON 必須包含：\n"
+        "   - list_sdg：27 個數字(0/1)，逗號分隔。\n"
+        "   - weight_description：字典，key 為設為1的 SDG 編號，value 為10–20字的繁體中文描述。\n"
+        "3) 位置1–17根據文本判斷，設為1或0；位置18–27固定為0。\n"
+        "4) 就算文本模糊或缺乏資訊，也必須**強制輸出剛好4個 SDG=1**。\n"
+        "   - 預設為 4(教育), 8(經濟), 11(城市), 17(夥伴)。\n"
+        "   - 若文本對其他SDG有明顯強訊號，可以替換，但總數仍須保持4個。\n"
+        "5) 禁止出現『抱歉』『無法』『需要更多資訊』等字眼。\n"
+        "6) 輸出內容不得為空，也不得缺少 list_sdg 或 weight_description。\n\n"
+        "【輸出範例】\n"
+        "{\n"
+        "  \"list_sdg\": \"0,0,0,1,0,0,0,1,0,0,1,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0\",\n"
+        "  \"weight_description\": {\n"
+        "    \"4\":  \"教育交流促進人才\",\n"
+        "    \"8\":  \"產業發展創造就業\",\n"
+        "    \"11\": \"建設永續友善城市\",\n"
+        "    \"17\": \"跨域合作強化夥伴\"\n"
+        "  }\n"
+        "}"
     )
+
     USER_PROMPT = (
         "請分析以下計畫內容，判斷對應的 SDGs 和本土指標：\n\n"
         "計畫名稱：國際事務推動運用計畫\n"
@@ -389,6 +403,9 @@ async def _classify_sdgs(settings, full: str) -> Tuple[str, Dict[str, str]]:
         "請提供 27 維度的分類結果和權重描述："
     )
     content = await _post_chat_stream_content(settings, SYSTEM_PROMPT, USER_PROMPT, temperature=0.2, top_p=0.9, max_tokens=800, timeout_s=90)
+    
+    # Debug: shelo content
+    logger.info("Hello after LLM ... raw sdgs json =%s", content)
     cleaned = content.replace("```json", "").replace("```", "")
     j = _safe_json(cleaned)
     list_sdg = _ensure_list_sdg_27(j.get("list_sdg") or "")
@@ -399,6 +416,12 @@ async def _classify_sdgs(settings, full: str) -> Tuple[str, Dict[str, str]]:
         wdesc = _default_weight_desc_from_active([str(a) for a in active])
     else:
         wdesc = {str(k): str(v) for k, v in wdesc.items() if str(k).strip().isdigit()}
+
+    # DEBUG, show full and list_sdg, wdesc
+    logger.info("HELLOooooooooooooooooooooooo")
+    logger.info("[fields][sdg] full=%s", full)
+    logger.info("[fields][sdg] return list_sdg=%s, weight_description=%s", list_sdg, wdesc)
+
     return list_sdg, wdesc
 
 # =========================
@@ -436,7 +459,8 @@ async def build_integrated_fields(*, settings, full_text: str) -> Dict[str, Any]
     # 2) 預算
     logger.info("")
     logger.info("💰 [2/5] 正在抽取預算金額...")
-    budget = await _extract_budget(settings, full)
+    # budget = await _extract_budget(settings, full)
+    budget = await _extract_budget_enhanced(settings, full)
     if not isinstance(budget, int):
         budget = 0
     logger.info("   ✅ 預算金額: %s 元", f"{budget:,}")

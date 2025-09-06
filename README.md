@@ -52,7 +52,7 @@ sudo apt-get update && sudo apt-get install -y \
 
 ```bash
 # Ollama 入口（同機或遠端；可設 http://IP:PORT 或 https://your.domain）
-OLLAMA_BASE_URL=https://ollama.4impact.cc
+OLLAMA_BASE_URL=https://ollama2.4impact.cc
 # 若上游需要自訂授權（可選）
 # OLLAMA_AUTH=Bearer xxxxx
 

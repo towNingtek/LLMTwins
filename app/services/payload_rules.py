@@ -28,7 +28,7 @@ def validate_and_fix_payload(obj: Dict[str, Any]) -> Dict[str, Any]:
     - org/hoster_email 型別防呆
     - name/philosophy 至少是字串
     """
-    fixed_email = "forus999@gmail.com"
+    fixed_email = "minamj@nantou.gov.tw"
     obj = dict(obj or {})
 
     # 1) email 固定
