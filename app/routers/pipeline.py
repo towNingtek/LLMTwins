@@ -211,5 +211,5 @@ async def api_one_click_pipeline(session_id: str, request: Request, body: Dict[s
     if not uuid:
         raise HTTPException(status_code=502, detail={"reason": "missing uuid", "data": data, "raw": raw})
 
-    cms_link = f"https://nsdgs.4impact.cc/content/{uuid}"
+    cms_link = f"https://cms.ntsdgs.tw/content/{uuid}"
     return {"uuid": uuid, "cmsLink": cms_link, "source": source}

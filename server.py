@@ -35,11 +35,14 @@ app.state.settings = load_settings(BASE_DIR)
 from fastapi.middleware.cors import CORSMiddleware
 
 ALLOWED_ORIGINS = [
-    "https://nsdgs.4impact.cc",   # 前端正式站
-    "https://eva.4impact.cc",     # 你 configs 也有
-    "http://localhost:3000",      # 本機開發 (React)
-    "http://localhost:5173",      # 本機開發 (Vite)
+    "https://nsdgs.4impact.cc",
+    "https://beta-nsdgs.4impact.cc",
+    "https://alpha-nsdgs.4impact.cc",
+    "https://eva.4impact.cc",
+    "http://localhost:3000",
+    "http://localhost:5173",
     "http://127.0.0.1:5173",
+    "https://cms.ntsdgs.tw",
 ]
 
 app.add_middleware(

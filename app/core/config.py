@@ -22,6 +22,9 @@ class Settings:
         "http://localhost:3000",
         "http://localhost:5173",
         "https://nsdgs.4impact.cc",
+        "https://beta-nsdgs.4impact.cc",
+        "https://alpha-nsdgs.4impact.cc",
+        "https://cms.ntsdgs.tw",
     ])
 
     # ==== 本步驟新增（Step 2 需要）====

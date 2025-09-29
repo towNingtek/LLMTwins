@@ -110,14 +110,25 @@ def _ocr_pdf_to_searchable(src_pdf: Path, dst_pdf: Path, *, lang: str, timeout_s
         str(src_pdf),
         str(dst_pdf),
     ]
+
+    # Debug msg
+    print(f"[ingest] Hello 5 Running OCR command: {' '.join(cmd)}")
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_sec)
+        # show debug info
+        print(f"[ingest] Hello 6 OCR command finished: {r.returncode}")
         return {"ok": r.returncode == 0, "code": r.returncode, "stdout": r.stdout, "stderr": r.stderr}
     except FileNotFoundError:
+        # show debug info
+        print("[ingest] Hello 7 OCR command failed: ocrmypdf not found")
         return {"ok": False, "code": -1, "error": "ocrmypdf not found"}
     except subprocess.TimeoutExpired:
+        # show debug info
+        print(f"[ingest] Hello 8 OCR command timeout: {timeout_sec}s")
         return {"ok": False, "code": -2, "error": f"OCR timeout > {timeout_sec}s"}
     except Exception as e:
+        # show debug info
+        print(f"[ingest] Hello 9 OCR command error: {repr(e)}")
         return {"ok": False, "code": -3, "error": repr(e)}
 
 def _pages_quality_flag(pages: List[str]) -> str:
@@ -154,6 +165,9 @@ def ingest_first_pdf_and_write_parsed(
     """
     cfg = _cfg()
 
+    # Debug msg
+    print(f"[ingest]Hello 3 ingest_first_pdf_and_write_parsed: session_id")
+
     sdir = sess_base / session_id
     raw_dir = sdir / "raw"
     art_dir = sdir / "artifacts"
@@ -166,6 +180,9 @@ def ingest_first_pdf_and_write_parsed(
     pdf_path = Path(pdfs[0])  # 可換成最新檔：Path(max(pdfs, key=os.path.getmtime))
     pages1 = _extract_pages_text(str(pdf_path))
     total_len1 = sum(len(p) for p in pages1)
+
+    # Debug msg
+    print(f"[ingest]Hello 4 ingest_first_pdf_and_write_parsed: session pages1={len(pages1)}, total_len1={total_len1}")
 
     ocr_used = False
     pages_final = pages1
@@ -191,6 +208,9 @@ def ingest_first_pdf_and_write_parsed(
             chunk_size=cfg["SAFE_CHUNK_SIZE"],
             overlap=cfg["SAFE_OVERLAP"]
         ))
+
+    # Show debug info
+    print(f"[ingest]Hello 6 ingest_first_pdf_and_write_parsed: session_id={session_id}")
 
     ocr_quality = _pages_quality_flag(pages_final) if ocr_used else ""
 

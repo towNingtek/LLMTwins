@@ -7,6 +7,9 @@ def parse_first_pdf_and_write(session_id: str, base_dir: Path, sess_base: Path, 
     # 延遲載入，避免啟動就吃 heavy 依賴
     from app.pdf_ingest import ingest_first_pdf_and_write_parsed, list_required_fields
 
+    # Debug msg
+    print(f"[ingest]Hello  parse_first_pdf_and_write: session_id={session_id}, model={model}")
+
     res = ingest_first_pdf_and_write_parsed(
         session_id=session_id,
         sess_base=sess_base,
@@ -46,5 +49,8 @@ def parse_first_pdf_and_write(session_id: str, base_dir: Path, sess_base: Path, 
         )
     except Exception:
         pass
+
+    # Debug msg
+    print(f"[ingest]Hello .. parse_first_pdf_and_write: session_id={session_id}")
 
     return {"ok": True, "pages": res.pages, "chunks": res.chunks, "filename": res.filename}

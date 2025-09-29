@@ -149,7 +149,7 @@ if [ -f "/tmp/cms_response.json" ]; then
                 echo "🎯 專案 ID: $PROJECT_ID"
                 
                 # 生成永續系統連結
-                PROJECT_URL="https://nsdgs.4impact.cc/content/$PROJECT_ID"
+                PROJECT_URL="https://cms.ntsdgs.tw/$PROJECT_ID"
                 echo "🔗 專案連結: $PROJECT_URL"
                 
                 # 驗證連結是否可訪問

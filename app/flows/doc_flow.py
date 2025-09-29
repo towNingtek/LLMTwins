@@ -72,7 +72,7 @@ async def handle_upload(st: Dict[str, Any], cms_url: str) -> Tuple[str, Dict[str
         uuid = data.get("uuid") or data.get("id") or ""
         st["step"] = "uploaded"
         st.setdefault("cms", {})["uuid"] = uuid
-        url = f"https://nsdgs.4impact.cc/content/{uuid}" if uuid else ""
+        url = f"https://cms.ntsdgs.tw/{uuid}" if uuid else ""
         msg = f"✅ 已上傳到永續系統。專案編號：{uuid or '（未回傳編號）'}" + (f"\n連結：{url}" if uuid else "")
         return msg, st
     else:
