@@ -4,6 +4,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional
 
+from dotenv import load_dotenv
+import os
+
+# 載入 .env
+load_dotenv()
+
 @dataclass
 class Settings:
     base_dir: Path
@@ -17,25 +23,13 @@ class Settings:
 
     # ==== 會話與 CORS ====
     sess_base: Path = field(default_factory=lambda: Path(os.getenv("SESS_BASE", "sessions")))
-    """
-    allowed_origins: List[str] = field(default_factory=lambda: [
-        "https://eva.4impact.cc",
-        # "http://localhost:3000",
-        # "http://localhost:5173",
-        "https://nsdgs.4impact.cc",
-        "https://nsdgs.4impact.cc",
-        "https://ntsdgs.4impact.cc",
-        "https://cms.ntsdgs.tw",
-        "https://beta-cms.ntsdgs.tw",
-    ])
-    """
 
     upstream_timeout_s: int = field(default_factory=lambda: int(os.getenv("UPSTREAM_TIMEOUT", "180")))
     cms_upload_url: str   = field(default_factory=lambda: os.getenv(
-        "CMS_UPLOAD_URL", "https://beta-tplanet-backend.ntsdgs.tw/projects/upload"
+        "CMS_UPLOAD_URL", f"{os.getenv('URL_TPLANET')}/projects/upload"
     ))
     cms_website_url: str = field(default_factory=lambda: os.getenv(
-        "CMS_WEBSITE_URL", "https://cms.ntsdgs.tw"
+        "CMS_WEBSITE_URL", f"{os.getenv('CMS_WEBSITE_URL')}"
     ))
     accept_encoding_identity: str = "identity"  # 一致化 header
 

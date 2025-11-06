@@ -1,4 +1,5 @@
 # app/routers/chat.py
+import os
 import requests, random
 import json
 import aiohttp
@@ -76,7 +77,7 @@ async def mapping(request: Request):
     if len(email_list) == 0:
         return JSONResponse(status_code=400, content={"error": "email_list is empty after filtering operator / duplicates"})
 
-    BASE_URL = "https://beta-tplanet-backend.ntsdgs.tw/"
+    BASE_URL = os.getenv("URL_TPLANET")
 
     # 3️⃣ 目錄結構：mapping 下包含操作者與其他帳號
     root_dir = Path("sessions") / session_id / "mapping"
