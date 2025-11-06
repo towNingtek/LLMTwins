@@ -1,4 +1,4 @@
-curl -X POST 'https://beta-tplanet-backend.ntsdgs.tw//projects/upload' \
+curl -X POST 'https://tplanet-backend-nantou-gov.ntsdgs.tw/projects/upload' \
   -H 'Content-Type: application/x-www-form-urlencoded' \
   --data-urlencode 'email=minamj@nantou.gov.tw' \
   --data-urlencode 'name=南投縣數位通服務整備計畫' \

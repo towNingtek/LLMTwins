@@ -1,4 +1,5 @@
 # app/routers/chat_demo.py - 升級版：真正的提示工程
+import os
 import json
 import csv
 import random
@@ -10,6 +11,9 @@ from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import StreamingResponse, JSONResponse
 
 from app.core.ndjson import ndjson_line, one_shot_ndjson
+
+from dotenv import load_dotenv
+load_dotenv()
 
 router = APIRouter(prefix="/api", tags=["planning"])
 
@@ -34,7 +38,7 @@ async def search_project_info(project_name: str) -> Optional[Dict]:
     try:
         async with httpx.AsyncClient() as client:
             response = await client.post(
-                "https://beta-tplanet-backend.ntsdgs.tw/projects/search",
+                f"{os.getenv('URL_TPLANET')}/projects/search",
                 headers={"Content-Type": "application/json"},
                 json={"name": project_name},
                 timeout=10.0
