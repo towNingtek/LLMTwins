@@ -8,23 +8,10 @@ from pathlib import Path
 from typing import List, Dict, Optional
 from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import StreamingResponse, JSONResponse
-from pydantic import BaseModel
 
 from app.core.ndjson import ndjson_line, one_shot_ndjson
 
-router = APIRouter(prefix="/api", tags=["chat_demo"])
-
-@router.get("/chat_demo/test")
-async def test_endpoint():
-    """測試端點 - 確認路由是否正確載入"""
-    return {"status": "chat_demo router is working!", "message": "路由載入成功"}
-
-class ChatDemoRequest(BaseModel):
-    sdgs: Optional[str] = None
-    model: Optional[str] = "qwen2.5:7b-instruct"
-    stream: Optional[bool] = True
-    userMessage: Optional[str] = None
-    projectName: Optional[str] = None  # 新增專案名稱欄位
+router = APIRouter(prefix="/api", tags=["planning"])
 
 def load_sdg_data(sdg_number: int) -> List[Dict]:
     """載入指定 SDG 的 CSV 數據"""
@@ -47,7 +34,7 @@ async def search_project_info(project_name: str) -> Optional[Dict]:
     try:
         async with httpx.AsyncClient() as client:
             response = await client.post(
-                "https://beta-tplanet-backend.4impact.cc/projects/search",
+                "https://beta-tplanet-backend.ntsdgs.tw/projects/search",
                 headers={"Content-Type": "application/json"},
                 json={"name": project_name},
                 timeout=10.0
@@ -191,9 +178,9 @@ async def call_llm_api(prompt: str, model: str, base_url: str, stream_callback=N
         print(f"LLM API error: {e}")
         raise e
 
-@router.post("/chat_demo")
-async def sdg_chat_demo(request: Request):
-    """SDG 聊天 Demo API - 真正的提示工程版本"""
+@router.post("/planning")
+async def planning(request: Request):
+    """SDG planning 計劃文案建議- 真正的提示工程版本"""
     
     try:
         settings = request.app.state.settings
@@ -208,10 +195,10 @@ async def sdg_chat_demo(request: Request):
         body = json.loads(payload_bytes.decode("utf-8"))
 
         sdgs_param = body.get("sdgs")
-        model = body.get("model", "qwen2.5:7b-instruct")
+        model = body.get("model", "openai/gpt-4o-mini")
         want_stream = body.get("stream", True)
         user_message = body.get("userMessage", "")
-        project_name = body.get("projectName", "")  # 新增專案名稱
+        project_name = body.get("projectName", "")
 
         print(f"Request: sdgs={sdgs_param}, model={model}, stream={want_stream}, project={project_name}")
 
@@ -303,7 +290,6 @@ async def sdg_chat_demo(request: Request):
             """真正的 LLM 串流回應"""
             try:
                 # 建立一個 queue 來處理串流數據
-                import asyncio
                 stream_queue = asyncio.Queue()
                 llm_finished = False
                 

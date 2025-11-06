@@ -7,9 +7,6 @@ def parse_first_pdf_and_write(session_id: str, base_dir: Path, sess_base: Path, 
     # 延遲載入，避免啟動就吃 heavy 依賴
     from app.pdf_ingest import ingest_first_pdf_and_write_parsed, list_required_fields
 
-    # Debug msg
-    print(f"[ingest]Hello  parse_first_pdf_and_write: session_id={session_id}, model={model}")
-
     res = ingest_first_pdf_and_write_parsed(
         session_id=session_id,
         sess_base=sess_base,
@@ -19,6 +16,21 @@ def parse_first_pdf_and_write(session_id: str, base_dir: Path, sess_base: Path, 
 
     if not res.ok:
         return {"ok": False, "error": res.error or "ingest failed"}
+
+    # === 新增：檢查 PDF 是否有文字層 ===
+    try:
+        from pdfminer.high_level import extract_text
+        pdf_path = sess_base / session_id / "raw" / res.filename
+
+        # debug message for pdf_path
+        logger.info(f"[ingest] Checking PDF text layer for {pdf_path}")
+        sample_text = extract_text(str(pdf_path), maxpages=1)
+        if sample_text and sample_text.strip():
+            logger.info(f"[ingest] PDF {res.filename} has text layer ✅ (length={len(sample_text.strip())})")
+        else:
+            logger.warning(f"[ingest] PDF {res.filename} seems image-only ⚠️ (no text layer detected)")
+    except Exception as e:
+        logger.error(f"[ingest] Failed to check text layer for {res.filename}: {e}")
 
     # required fields
     try:
@@ -49,8 +61,5 @@ def parse_first_pdf_and_write(session_id: str, base_dir: Path, sess_base: Path, 
         )
     except Exception:
         pass
-
-    # Debug msg
-    print(f"[ingest]Hello .. parse_first_pdf_and_write: session_id={session_id}")
 
     return {"ok": True, "pages": res.pages, "chunks": res.chunks, "filename": res.filename}

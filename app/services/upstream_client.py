@@ -1,7 +1,7 @@
 # app/services/upstream_client.py
-import json, aiohttp, asyncio
-from typing import List, Tuple, Dict, Any
-
+# import json, aiohttp, asyncio
+# from typing import List, Tuple, Dict, Any
+"""
 async def ask_upstream_json(
     base_url: str,
     model: str,
@@ -22,3 +22,4 @@ async def ask_upstream_json(
         return False, "timeout"
     except Exception as e:
         return False, f"error: {e}"
+"""

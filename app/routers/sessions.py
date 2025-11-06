@@ -8,7 +8,7 @@ import uuid
 from app.logger import logger
 
 from app.session_utils import (
-    session_dir, ensure_dir, append_history,   # append_history 這步用不到，但之後 upload 會用
+    session_dir, ensure_dir, append_history,
     init_session_dirs, write_effective_template
 )
 from app.services.ingest_service import parse_first_pdf_and_write
@@ -53,9 +53,6 @@ async def get_session_state(session_id: str, request: Request):
 async def upload_to_session(session_id: str, request: Request,
                            file: UploadFile = File(...),
                            auto_parse: bool = Query(True, description="是否自動解析 PDF 並更新 state")):
-   # DEBUG: Calculate upload time
-   import time
-   start_time = time.time()
 
    sess_base = request.app.state.sess_base
    base_dir = request.app.state.base_dir
@@ -121,14 +118,9 @@ async def upload_to_session(session_id: str, request: Request,
    if suffix == ".pdf" and auto_parse:
        try:
            # Debug msg
-           print(f"Hello 88 [ingest] Starting parse_first_pdf_and_write for session_id=")
            parse_result = parse_first_pdf_and_write(session_id, base_dir, sess_base, state_store, model="project")
        except Exception as e:
            parse_result = {"ok": False, "error": f"parse failed: {e}"}
-
-   # DEBUG: Log upload time
-   upload_time = time.time() - start_time
-   print(f"HELLO DURATION !!! : Upload completed in {upload_time:.2f} seconds for session {session_id}")
 
    return {
        "ok": True,

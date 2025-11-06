@@ -11,6 +11,7 @@ from pathlib import Path
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
+from app.logger import logger
 
 # 先自載 .env，避免 import 順序問題
 from dotenv import load_dotenv
@@ -107,28 +108,19 @@ def _ocr_pdf_to_searchable(src_pdf: Path, dst_pdf: Path, *, lang: str, timeout_s
         "--deskew",
         "--rotate-pages",
         "--language", lang,
+        "--tesseract-timeout", "300",# infos = await Promise
         str(src_pdf),
         str(dst_pdf),
     ]
 
-    # Debug msg
-    print(f"[ingest] Hello 5 Running OCR command: {' '.join(cmd)}")
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_sec)
-        # show debug info
-        print(f"[ingest] Hello 6 OCR command finished: {r.returncode}")
         return {"ok": r.returncode == 0, "code": r.returncode, "stdout": r.stdout, "stderr": r.stderr}
     except FileNotFoundError:
-        # show debug info
-        print("[ingest] Hello 7 OCR command failed: ocrmypdf not found")
         return {"ok": False, "code": -1, "error": "ocrmypdf not found"}
     except subprocess.TimeoutExpired:
-        # show debug info
-        print(f"[ingest] Hello 8 OCR command timeout: {timeout_sec}s")
         return {"ok": False, "code": -2, "error": f"OCR timeout > {timeout_sec}s"}
     except Exception as e:
-        # show debug info
-        print(f"[ingest] Hello 9 OCR command error: {repr(e)}")
         return {"ok": False, "code": -3, "error": repr(e)}
 
 def _pages_quality_flag(pages: List[str]) -> str:
@@ -165,9 +157,6 @@ def ingest_first_pdf_and_write_parsed(
     """
     cfg = _cfg()
 
-    # Debug msg
-    print(f"[ingest]Hello 3 ingest_first_pdf_and_write_parsed: session_id")
-
     sdir = sess_base / session_id
     raw_dir = sdir / "raw"
     art_dir = sdir / "artifacts"
@@ -178,28 +167,53 @@ def ingest_first_pdf_and_write_parsed(
         return IngestResult(False, 0, 0, "", False, "", error="no pdf in raw/")
 
     pdf_path = Path(pdfs[0])  # 可換成最新檔：Path(max(pdfs, key=os.path.getmtime))
+
+    # 第一階段：pdfminer 提取
     pages1 = _extract_pages_text(str(pdf_path))
     total_len1 = sum(len(p) for p in pages1)
 
-    # Debug msg
-    print(f"[ingest]Hello 4 ingest_first_pdf_and_write_parsed: session pages1={len(pages1)}, total_len1={total_len1}")
+    # 在 ingest_first_pdf_and_write_parsed 開頭加上
+    logger.info(f"[ingest] OCR_ENABLED={cfg['OCR_ENABLED']}")
+    logger.info(f"[ingest] OCR_TEXTLEN_THRESHOLD={cfg['OCR_TEXTLEN_THRESHOLD']}")
+    logger.info(f"[ingest] total_len1={total_len1}, pages1={len(pages1)}")
+
+    for i, page_text in enumerate(pages1):
+       logger.info(f"[ingest] Page {i+1} length: {len(page_text)}, content preview: {page_text[:100]!r}")
 
     ocr_used = False
     pages_final = pages1
-
+    
     if total_len1 < cfg["OCR_TEXTLEN_THRESHOLD"] and cfg["OCR_ENABLED"]:
+        logger.info(f"[ingest] 🔍 OCR condition met: total_len1({total_len1}) < threshold({cfg['OCR_TEXTLEN_THRESHOLD']})")
+        
         ocr_pdf = art_dir / "ocr_searchable.pdf"
+        logger.info(f"[ingest] 🚀 Starting OCR: {pdf_path} -> {ocr_pdf}")
+        
         ocr_res = _ocr_pdf_to_searchable(
             pdf_path, ocr_pdf,
             lang=cfg["OCR_LANG"],
             timeout_sec=cfg["OCR_TIMEOUT_SEC"]
         )
+        
+        logger.info(f"[ingest] 📊 OCR result: {ocr_res}")
+        
         if ocr_res.get("ok"):
+            logger.info(f"[ingest] ✅ OCR succeeded, extracting text from {ocr_pdf}")
             pages2 = _extract_pages_text(str(ocr_pdf))
-            if sum(len(p) for p in pages2) > total_len1:
+            
+            total_len2 = sum(len(p) for p in pages2)
+            logger.info(f"[ingest] 📏 OCR extracted length: {total_len2} (original: {total_len1})")
+            
+            if total_len2 > total_len1:
                 pages_final = pages2
                 ocr_used = True
-        # 失敗就沿用原結果
+                logger.info(f"[ingest] ✨ Using OCR results")
+            else:
+                logger.warning(f"[ingest] ⚠️ OCR didn't improve results, keeping original")
+        else:
+            logger.error(f"[ingest] ❌ OCR failed: {ocr_res}")
+    else:
+        logger.info(f"[ingest] ⏭️ Skipping OCR: total_len1={total_len1}, threshold={cfg.get('OCR_TEXTLEN_THRESHOLD')}, enabled={cfg.get('OCR_ENABLED')}")
 
     chunks = []
     for i, t in enumerate(pages_final, start=1):
@@ -208,10 +222,8 @@ def ingest_first_pdf_and_write_parsed(
             chunk_size=cfg["SAFE_CHUNK_SIZE"],
             overlap=cfg["SAFE_OVERLAP"]
         ))
-
+    
     # Show debug info
-    print(f"[ingest]Hello 6 ingest_first_pdf_and_write_parsed: session_id={session_id}")
-
     ocr_quality = _pages_quality_flag(pages_final) if ocr_used else ""
 
     payload = {

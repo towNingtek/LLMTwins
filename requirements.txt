@@ -5,7 +5,12 @@ aiohttp>=3.9,<4.0
 python-multipart>=0.0.6,<0.0.8
 pyyaml>=6.0,<7.0
 
-# PDF / OCR stack
+# PDF / OCR stack, maybe remove?
 pdfminer.six==20250506
 ocrmypdf>=14.4,<15.0
 pikepdf>=8.0,<9.0
+
+# New PDF / OCR stack
+pytesseract
+Pillow 
+PyMuPDF

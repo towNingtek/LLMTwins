@@ -1,4 +1,4 @@
-# qwen2.5:7b-instruct
+# openai/gpt-4o-mini
 # llama3:instruct
 SYS='所有輸出一律正體中文（台灣用語），禁止任何英文字母與拼音。只輸出答案，不要解釋。'
 
@@ -9,7 +9,7 @@ EXAMPLE='您好，歡迎光臨！請問需要哪方面的協助？
 curl -sS -N --http1.1 --no-buffer http://localhost:8002/api/chat \
   -H 'Content-Type: application/json' \
   -d "$(jq -nc --arg sys "$SYS" --arg ex "$EXAMPLE" '{
-    model:"qwen2.5:7b-instruct",
+    model:"openai/gpt-4o-mini",
     stream:true,
     options:{temperature:0.2},
     messages:[

@@ -16,7 +16,7 @@ from app.routers.debug import router as debug_router
 from app.routers.admin import router as admin_router
 from app.routers.chat import router as chat_router
 from app.routers.pipeline import router as pipeline_router
-from app.routers import chat_demo
+from app.routers import planning
 
 # ============================================================================
 # Configuration & Initialization
@@ -37,12 +37,15 @@ from fastapi.middleware.cors import CORSMiddleware
 ALLOWED_ORIGINS = [
     "https://nsdgs.4impact.cc",
     "https://beta-nsdgs.4impact.cc",
-    "https://alpha-nsdgs.4impact.cc",
+    "https://ntsdgs.4impact.cc",
     "https://eva.4impact.cc",
-    "http://localhost:3000",
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
+    # "http://localhost:3000",
+    # "http://localhost:5173",
+    # "http://127.0.0.1:5173",
+    "https://beta-cms.ntsdgs.tw",
     "https://cms.ntsdgs.tw",
+    "https://ntidipc.ntsdgs.tw",
+    "https://beta-tplanet-backend.ntsdgs.tw"
 ]
 
 app.add_middleware(
@@ -61,7 +64,7 @@ app.include_router(debug_router)
 app.include_router(admin_router)
 app.include_router(chat_router)
 app.include_router(pipeline_router)
-app.include_router(chat_demo.router)
+app.include_router(planning.router)
 
 # ============================================================================
 # Startup: inject shared state & load policy

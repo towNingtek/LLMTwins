@@ -8,15 +8,17 @@ from app.logger import logger
 from app.services.parsed_reader import extract_plaintext
 from app.services.state_utils import read_state
 from app.services.cms_uploader import post_cms_upload
-from app.flows.fields_flow import build_cms_payload
-from app.flows.claude_port import build_integrated_fields
+# from app.flows.fields_flow import build_cms_payload
+
+# from app.flows.claude_port import build_integrated_fields
+# from app.flows.claude_port_bundle import build_integrated_fields
 
 router = APIRouter(prefix="/api", tags=["pipeline"])
 
 # --------- naive fallback：從純文字抓常見欄位，先讓流程跑通 ----------
-SDG_DEFAULT_ON = [4, 8, 11, 17]
-SDG_LEN = 27
-
+# SDG_DEFAULT_ON = [4, 8, 11, 17]
+# SDG_LEN = 27
+"""
 def _find_name(txt: str) -> str:
     # 1) 尋找「計畫名稱：xxx」
     m = re.search(r"(?:計畫|計劃|專案)\s*名稱[：:]\s*([^\n\r]{4,50})", txt)
@@ -70,7 +72,8 @@ def _default_weight_desc(on=SDG_DEFAULT_ON) -> Dict[str, str]:
         17: "建立國際夥伴關係促進跨域合作",
     }
     return {str(k): lib.get(k, "本項目與該目標具關聯性") for k in on}
-
+"""
+"""
 def _naive_build_payload(plain: str) -> Dict[str, Any]:
     name = _find_name(plain)
     budget = _find_budget(plain)
@@ -90,9 +93,10 @@ def _naive_build_payload(plain: str) -> Dict[str, Any]:
         "is_budget_revealed": True,
         "project_type": "0"
     }
+"""
 
 # ---------------------------------------------------------------------------
-
+"""
 @router.post("/integrated_fields")
 async def api_integrated_fields(request: Request, body: Dict[str, Any] = Body(...)):
     settings = request.app.state.settings
@@ -127,13 +131,11 @@ async def api_integrated_fields(request: Request, body: Dict[str, Any] = Body(..
             source = "naive"
 
     return {"payload": payload, "source": source}
+"""
 
+"""
 @router.post("/cms/upload")
 async def api_cms_upload(request: Request, body: Dict[str, Any] = Body(...)):
-    """
-    直接把 payload 丟到 CMS
-    回傳: {"uuid": "...", "raw": "...(optional)"}
-    """
     settings = request.app.state.settings
     if not isinstance(body, dict):
         raise HTTPException(status_code=400, detail="invalid payload")
@@ -147,27 +149,37 @@ async def api_cms_upload(request: Request, body: Dict[str, Any] = Body(...)):
         raise HTTPException(status_code=502, detail={"reason": "missing uuid", "data": data, "raw": raw})
 
     return {"uuid": uuid, "raw": raw}
-
+"""
+from app.utils.llm_pipeline import build_bundle_fields
 @router.post("/sessions/{session_id}/pipeline/one_click")
 async def api_one_click_pipeline(session_id: str, request: Request, body: Dict[str, Any] = Body(None)):
+    import json, hashlib
+    from pathlib import Path
+    
     settings = request.app.state.settings
 
     st = read_state(settings.sess_base, session_id) or {}
     st.update({"session_id": session_id, "sess_base": settings.sess_base, "settings": settings})
 
+    # 從 artifacts/parsed.json 讀出各 chunk 的 text，串成純文字並截長。
     plain = extract_plaintext(settings.sess_base, session_id, max_chars=20000)
+    if not plain:
+        logger.warning("[one_click] plain is empty, fallback to parsed.json")
+        parsed_path = Path(settings.sess_base) / session_id / "artifacts" / "parsed.json"
+        if parsed_path.exists():
+            logger.info("[one_click] using parsed.json for plain text")
+            pj = json.loads(parsed_path.read_text(encoding="utf-8"))
+            pages = pj.get("pages") or []
 
     # === 調試：比對 API 的 plain 與 sessions/<SID>/artifacts/parsed.json 是否一致 ===
-    import os, json, hashlib
-    from pathlib import Path
 
     try:
-        # 1) API 實際傳入的 plain 正規化 + 截前 2500 算 hash
+        print("[integrated_fields] DEBUG input compare")
+        
         norm_plain = re.sub(r"\s+", " ", (plain or "").strip())
         api_head = norm_plain[:160]
         api_hash = hashlib.sha256(norm_plain[:2500].encode("utf-8")).hexdigest()
 
-        # 2) 讀 session 檔案（你認為應該要吃的那份）
         sess_parsed = Path(settings.sess_base) / session_id / "artifacts" / "parsed.json"
         file_hash = "NA"
         file_head = ""
@@ -186,30 +198,22 @@ async def api_one_click_pipeline(session_id: str, request: Request, body: Dict[s
     except Exception as dbg_e:
         logger.info("[integrated_fields] DEBUG input compare failed: %s", dbg_e)
 
-
-    source = "fallback"
+    # === bundle ===
     try:
-        payload = await build_integrated_fields(settings=settings, full_text=plain)
-        if not isinstance(payload, dict):
-            raise ValueError("payload must be dict")
-        source = "shell-port"
+        bundle, payload = await build_bundle_fields(settings, plain, body)
+        if not payload:
+            raise ValueError("bundle returned empty payload")
+
+        status, data, raw = await post_cms_upload(payload, settings.cms_upload_url)
+        if status >= 400:
+            raise HTTPException(status_code=status, detail=data or {"raw": raw})
+
+        uuid = (data or {}).get("uuid")
+        if not uuid:
+            raise HTTPException(status_code=502, detail={"reason": "missing uuid", "data": data, "raw": raw})
+
+        cms_link = settings.cms_website_url + f"/content/{uuid}"
+        return {"uuid": uuid, "cmsLink": cms_link, "source": "bundle"}
     except Exception as e:
-        logger.exception("[one_click] shell-port failed, try fields_flow: %s", e)
-        try:
-            payload = await build_cms_payload(st=st, plain=plain)
-            source = "llm"
-        except Exception as e2:
-            logger.exception("[one_click] fields_flow failed, use naive: %s", e2)
-            payload = _naive_build_payload(plain or "")
-            source = "naive"
-
-    status, data, raw = await post_cms_upload(payload, settings.cms_upload_url)
-    if status >= 400:
-        raise HTTPException(status_code=status, detail=data or {"raw": raw})
-
-    uuid = (data or {}).get("uuid")
-    if not uuid:
-        raise HTTPException(status_code=502, detail={"reason": "missing uuid", "data": data, "raw": raw})
-
-    cms_link = f"https://cms.ntsdgs.tw/content/{uuid}"
-    return {"uuid": uuid, "cmsLink": cms_link, "source": source}
+        logger.exception("[one_click] bundle pipeline failed: %s", e)
+        raise HTTPException(status_code=500, detail={"reason": "bundle pipeline failed", "error": str(e)})

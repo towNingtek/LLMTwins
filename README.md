@@ -15,7 +15,7 @@
   * RAG（向量檢索；後續：YOLO 多模態）
   * Agent 編排（多 Agent 中「多選一」路由、工具白名單）
   * 觀測（debug 端點、之後可接 run/trace）
-* **Ollama**：模型供應（llama3、qwen2.5…）；可經 Nginx 反代（HTTPS）。
+* **Ollama**：模型供應（llama3、openai/gpt-4o-mini…）；可經 Nginx 反代（HTTPS）。
 
 ---
 
@@ -88,7 +88,7 @@ Content-Type: application/json
 
 ```json
 {
-  "model": "qwen2.5:7b-instruct",
+  "model": "openai/gpt-4o-mini",
   "stream": true,
   "messages": [
     {"role":"system","content":"請以繁體中文（台灣用語）回覆。"},
@@ -193,7 +193,7 @@ curl -sS -N --http1.1 --no-buffer http://localhost:8002/api/chat \
 ```bash
 curl -sS -N --http1.1 --no-buffer http://localhost:8002/api/chat \
   -H 'Content-Type: application/json' \
-  -d '{"model":"qwen2.5:7b-instruct","stream":true,
+  -d '{"model":""openai/gpt-4o-mini"","stream":true,
        "messages":[{"role":"user","content":"你是哪間公司的產品"}]}'
 ```
 

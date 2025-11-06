@@ -17,7 +17,7 @@ async def debug_upstream(request: Request):
         r = await client.get(f"{base}/")
         root_ok = (r.status_code == 200 and (r.text or "").strip() == "ok")
         payload = {
-            "model": "qwen2.5:7b-instruct",
+            "model": "openai/gpt-4o-mini",
             "stream": False,
             "messages": [
                 {"role": "system", "content": "ping"},

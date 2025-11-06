@@ -17,26 +17,31 @@ class Settings:
 
     # ==== 會話與 CORS ====
     sess_base: Path = field(default_factory=lambda: Path(os.getenv("SESS_BASE", "sessions")))
+    """
     allowed_origins: List[str] = field(default_factory=lambda: [
         "https://eva.4impact.cc",
-        "http://localhost:3000",
-        "http://localhost:5173",
+        # "http://localhost:3000",
+        # "http://localhost:5173",
         "https://nsdgs.4impact.cc",
-        "https://beta-nsdgs.4impact.cc",
-        "https://alpha-nsdgs.4impact.cc",
+        "https://nsdgs.4impact.cc",
+        "https://ntsdgs.4impact.cc",
         "https://cms.ntsdgs.tw",
+        "https://beta-cms.ntsdgs.tw",
     ])
+    """
 
-    # ==== 本步驟新增（Step 2 需要）====
-    upstream_timeout_s: int = field(default_factory=lambda: int(os.getenv("UPSTREAM_TIMEOUT", "180")))  # 上游逾時（秒）
+    upstream_timeout_s: int = field(default_factory=lambda: int(os.getenv("UPSTREAM_TIMEOUT", "180")))
     cms_upload_url: str   = field(default_factory=lambda: os.getenv(
-        "CMS_UPLOAD_URL", "https://beta-tplanet-backend.4impact.cc/projects/upload"
+        "CMS_UPLOAD_URL", "https://beta-tplanet-backend.ntsdgs.tw/projects/upload"
+    ))
+    cms_website_url: str = field(default_factory=lambda: os.getenv(
+        "CMS_WEBSITE_URL", "https://cms.ntsdgs.tw"
     ))
     accept_encoding_identity: str = "identity"  # 一致化 header
 
     # ==== 抽取模型 & 自身 Base（可選）====
-    fields_model: str = field(default_factory=lambda: os.getenv("FIELDS_MODEL", "qwen2.5:7b-instruct"))
-    self_base_url: str = field(default_factory=lambda: os.getenv("SELF_BASE_URL", ""))  # 若想優先走自己的 /api/chat，可在 .env 設
+    fields_model: str = field(default_factory=lambda: os.getenv("FIELDS_MODEL", "openai/gpt-4o-mini"))
+    self_base_url: str = field(default_factory=lambda: os.getenv("SELF_BASE_URL", ""))
 
 
 def load_settings(base_dir: Path) -> Settings:

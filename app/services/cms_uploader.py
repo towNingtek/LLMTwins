@@ -15,6 +15,8 @@ def format_payload_for_cms(payload: Dict[str, Any]) -> Dict[str, str]:
     return data
 
 async def post_cms_upload(payload: Dict[str, Any], upload_url: str) -> Tuple[int, Dict[str, Any], str]:
+
+    # Debug: 檢查 payload
     data = format_payload_for_cms(payload)
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=120)) as s:
         async with s.post(upload_url, data=data) as r:
