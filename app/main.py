@@ -56,25 +56,15 @@ def to_ndjson(obj: dict) -> str:
     return json.dumps(obj, ensure_ascii=False) + "\n"
 
 
-def extract_text_from_event(event: Any) -> str:
-    """從 workflow event 結構中抽 token（若存在）"""
-    if isinstance(event, dict):
-        if "respond" in event:
-            payload = event["respond"]
-            if isinstance(payload, dict) and "token" in payload:
-                return payload["token"]
-    return ""
-
-
 # =========================================
 # NDJSON Streaming wrapper
 # =========================================
 
 async def unified_stream(role: str, workflow_input: Dict[str, Any]) -> AsyncGenerator[str, None]:
     """
-    轉換 LangGraph astream(...) → NDJSON stream。
+    使用 astream_events 轉換 LangGraph event → NDJSON stream，實現 token 串流。
     """
-    print("[DEBUG] unified_stream START")
+    print("[DEBUG] unified_stream START (astream_events)")
 
     if role not in WORKFLOWS:
         raise HTTPException(status_code=404, detail=f"Unknown role: {role}")
@@ -83,33 +73,42 @@ async def unified_stream(role: str, workflow_input: Dict[str, Any]) -> AsyncGene
     workflow = workflow_factory()
 
     try:
-        async for event in workflow.astream(workflow_input):
-            print("[DEBUG] event:", event)
-
-            # 1) 若是 token event → 輸出 {"type":"message","content":"..."}
-            text = extract_text_from_event(event)
-            if text:
-                yield to_ndjson({
-                    "type": "message",
-                    "content": text
-                })
-                continue
-
-            # 2) 若不是 token event → 完整輸出整個 event（debug friendly）
-            yield to_ndjson({
-                "type": "event",
-                "data": event
-            })
-
-        # workflow 結束
-        yield to_ndjson({"type": "done"})
-        print("[DEBUG] unified_stream END")
+        # *** 核心關鍵：使用 astream_events 監聽所有事件 ***
+        # version="v1" 適用於 LangGraph 1.0.3
+        async for event in workflow.astream_events(workflow_input, version="v1", tags=[role]):
+            kind = event["event"]
+            
+            # 1. 串流 Token 捕獲：監聽 'on_chain_stream' 事件
+            if kind == "on_chain_stream":
+                data = event.get("data", {})
+                
+                # 'chunk' 結構就是 Node 內部 yield 的內容: {"respond": {"token": "..."}}
+                chunk = data.get("chunk")
+                
+                if isinstance(chunk, dict) and "respond" in chunk:
+                    token_payload = chunk["respond"]
+                    if isinstance(token_payload, dict) and "token" in token_payload:
+                        token_content = token_payload["token"]
+                        
+                        # 找到 token，立刻輸出為 NDJSON
+                        if token_content:
+                            yield to_ndjson({
+                                "type": "message",
+                                "content": token_content
+                            })
+                            continue
+            
+            # 2. 結束事件：當整個流程結束時發出
+            elif kind == "on_end":
+                # 流程結束，發送完成信號
+                yield to_ndjson({"type": "done"})
+                print("[DEBUG] unified_stream END")
+                return # 結束函數
 
     except Exception as e:
         err = f"[Workflow ERROR] {str(e)}"
         print(err)
         yield to_ndjson({"type": "error", "detail": err})
-
 
 # =========================================
 # Routes

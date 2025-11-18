@@ -1,21 +1,20 @@
 # roles/ai_cat/graph.py
-from pydantic import BaseModel
-from langgraph.graph import StateGraph, END
-from roles.ai_cat.nodes.respond_llm import respond_llm_node
+from langgraph.graph import StateGraph, END, START 
+from typing import Dict, Any
 
-class State(BaseModel):
-    messages: list = []
+# 導入剛剛修改的 generator node
+from roles.ai_cat.nodes.respond_llm import respond_llm_node 
 
 def ai_cat_workflow():
-    graph = StateGraph(State)
+    from roles.ai_cat.state import CatState 
+    
+    # 關鍵：移除 channels 參數
+    graph = StateGraph(CatState) 
+    
+    # 關鍵：直接註冊 Generator Node
+    graph.add_node("respond_llm", respond_llm_node) 
 
-    # Node
-    graph.add_node("respond_llm", respond_llm_node)
-
-    # Required entry
-    graph.add_edge("__start__", "respond_llm")
-
-    # Finish
+    graph.add_edge(START, "respond_llm")
     graph.add_edge("respond_llm", END)
 
     return graph.compile()

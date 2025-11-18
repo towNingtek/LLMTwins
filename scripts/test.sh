@@ -5,7 +5,7 @@ curl -sN -H "Content-Type: application/json" \
       "model": "openai/gpt-4o-mini",
       "messages": [
         {"role": "system", "content": "所有輸出都用繁體中文（台灣用語）。"},
-        {"role": "user", "content": "你好，你會講中文嗎？"}
+        {"role": "user", "content": "你好，你有名字嗎？"}
       ]
     }
   }' http://localhost:9000/chat
