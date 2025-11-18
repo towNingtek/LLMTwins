@@ -1,39 +1,32 @@
 # core/llm_clients.py
-import os
 import httpx
+import os
 import json
-from typing import AsyncGenerator
+from typing import AsyncGenerator, List, Any
 
-base_url = os.getenv("OLLAMA_GATEWAY_URL").rstrip("/")
-chat_url = f"{base_url}/api/chat"
+OLLAMA_GATEWAY_URL = os.getenv("OLLAMA_GATEWAY_URL", "http://localhost:8002")
 
-async def chat(model, messages, stream=False, temperature=0.3):
-    payload = {
+
+def convert_messages(raw_messages: List[Any]):
+    out = []
+    for m in raw_messages:
+        if isinstance(m, dict) and "role" in m and "content" in m:
+            out.append(m)
+        else:
+            out.append({"role": "user", "content": str(m)})
+    return out
+
+
+async def stream_ollama(messages, model="openai/gpt-4o-mini"):
+    body = {
         "model": model,
-        "messages": messages,
-        "stream": stream,
-        "options": {"temperature": temperature},
+        "stream": True,
+        "messages": messages
     }
 
-    if not stream:
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(chat_url, json=payload)
-            data = resp.json()
-            return data["message"]
-
-    async def stream_generator() -> AsyncGenerator[str, None]:
-        async with httpx.AsyncClient() as client:
-            async with client.stream("POST", chat_url, json=payload) as resp:
-                async for line in resp.aiter_lines():
-                    if not line.strip():
-                        continue
-                    try:
-                        obj = json.loads(line)
-                        msg = obj.get("message", {})
-                        content = msg.get("content")
-                        if content:
-                            yield content
-                    except:
-                        continue
-
-    return stream_generator()
+    async with httpx.AsyncClient(timeout=None) as client:
+        async with client.stream("POST", f"{OLLAMA_GATEWAY_URL}/api/chat", json=body) as resp:
+            resp.raise_for_status()
+            async for line in resp.aiter_lines():
+                if line:
+                    yield line

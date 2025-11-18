@@ -1,37 +1,15 @@
-# -------------------------------------------------
-# 🔧 Core LLM / Workflow Layer
-# -------------------------------------------------
-
-# LangGraph
+# LangGraph 最新
 langgraph>=1.0.3,<2.0.0
 langgraph-prebuilt>=1.0.4,<2.0.0
 
-# LangChain Core —— LangGraph 所依賴的核心 runtime
+# LangChain Core 1.x
 langchain-core>=1.0.5,<2.0.0
 
-# LangChain-OpenAI —— 與 OpenAI 模型的介接
+# OpenAI wrapper
 langchain-openai>=0.2.14,<1.0.0
 
-
-# -------------------------------------------------
-# 🔧 LangServe —— 提供 /workflow/** API
-# -------------------------------------------------
-
-# 固定此版本最穩定，與 LangGraph / LangChain-Core 兼容性最佳
-langserve[server]==0.3.2
-
-
-# -------------------------------------------------
-# 🌐 Web Server / API
-# -------------------------------------------------
-
+# FastAPI runtime
 fastapi>=0.115.0,<1.0.0
 uvicorn[standard]>=0.30.0,<1.0.0
 httpx>=0.27.0,<0.28.0
-
-
-# -------------------------------------------------
-# ⚙️ Environment / Settings
-# -------------------------------------------------
-
 python-dotenv>=1.0.0,<2.0.0

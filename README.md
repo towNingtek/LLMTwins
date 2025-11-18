@@ -1,6 +1,6 @@
 # 📘 LLMTwins — Multi‑Role Workflow Server
 
-LLMTwins 是一套基於 **FastAPI + LangGraph + LangServe**、並支援「多角色自動載入」的工作流程系統。
+LLMTwins Role-driven Agent 是一套基於 **FastAPI + LangGraph + LangServe**、並支援「多角色自動載入」的工作流程系統。
 
 每個角色（role）是一個獨立的 AI agent workflow，包含：
 

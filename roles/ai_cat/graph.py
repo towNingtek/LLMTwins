@@ -1,20 +1,21 @@
-from langgraph.graph import StateGraph
-from roles.ai_cat.state import CatState
-from roles.ai_cat.nodes.respond import respond_node
-from core.role_profiles import load_role_profile
+# roles/ai_cat/graph.py
+from pydantic import BaseModel
+from langgraph.graph import StateGraph, END
+from roles.ai_cat.nodes.respond_llm import respond_llm_node
 
+class State(BaseModel):
+    messages: list = []
 
 def ai_cat_workflow():
-    profile = load_role_profile("ai_cat")
+    graph = StateGraph(State)
 
-    workflow = StateGraph(CatState)
+    # Node
+    graph.add_node("respond_llm", respond_llm_node)
 
-    async def respond_node_wrapped(state):
-        return await respond_node(state, profile)
+    # Required entry
+    graph.add_edge("__start__", "respond_llm")
 
-    workflow.add_node("respond", respond_node_wrapped)
+    # Finish
+    graph.add_edge("respond_llm", END)
 
-    workflow.set_entry_point("respond")
-    workflow.set_finish_point("respond")
-
-    return workflow.compile()
+    return graph.compile()
