@@ -4,10 +4,23 @@ import os
 import json
 from typing import AsyncGenerator, List, Any
 
-OLLAMA_GATEWAY_URL = os.getenv("OLLAMA_GATEWAY_URL", "http://localhost:8002")
+from dotenv import load_dotenv
+load_dotenv()
 
+# Gateway URL（支援 Ollama Gateway / OpenAI Gateway）
+OLLAMA_GATEWAY_URL = os.getenv("OLLAMA_GATEWAY_URL", "http://localhost:8082")
+OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "http://localhost:8002")
+
+
+# ============================================================
+# Utility
+# ============================================================
 
 def convert_messages(raw_messages: List[Any]):
+    """
+    將 messages 統一成 OpenAI 標準格式：
+    [{"role": "...", "content": "..."}]
+    """
     out = []
     for m in raw_messages:
         if isinstance(m, dict) and "role" in m and "content" in m:
@@ -17,12 +30,23 @@ def convert_messages(raw_messages: List[Any]):
     return out
 
 
-async def stream_ollama(messages, model="openai/gpt-4o-mini"):
+# ============================================================
+# OpenAI-format Streaming Gateway (NDJSON)
+# ============================================================
+
+async def stream_openai(model, messages, tools=None, options=None):
     body = {
         "model": model,
         "stream": True,
-        "messages": messages
+        "messages": convert_messages(messages),
     }
+
+    if tools:
+        body["tools"] = tools
+        body["tool_choice"] = "auto"
+
+    if options:
+        body.update(options)
 
     async with httpx.AsyncClient(timeout=None) as client:
         async with client.stream("POST", f"{OLLAMA_GATEWAY_URL}/api/chat", json=body) as resp:
@@ -30,3 +54,82 @@ async def stream_ollama(messages, model="openai/gpt-4o-mini"):
             async for line in resp.aiter_lines():
                 if line:
                     yield line
+
+
+# ============================================================
+# Ollama Gateway (OpenAI 格式)
+# ============================================================
+
+async def stream_ollama(
+    model: str,
+    messages: List[Any],
+    tools: list | None = None,
+) -> AsyncGenerator[str, None]:
+    
+    body = {
+        "model": model,
+        "stream": True,
+        "messages": convert_messages(messages),
+    }
+
+    if tools:
+        body["tools"] = tools
+
+    async with httpx.AsyncClient(timeout=None) as client:
+        async with client.stream(
+            "POST",
+            f"{OLLAMA_GATEWAY_URL}/api/chat",
+            json=body
+        ) as resp:
+            
+            async for line in resp.aiter_lines():
+                print("🌊 RAW STREAM >>>", line)  # Debug 輸出
+                if line:
+                    yield line  # 再交給 LLMTwins runtime
+
+
+
+# ============================================================
+# Minimal LLMClient（供 runtime 使用）
+# ============================================================
+
+class LLMClient:
+    """
+    LLMTwins runtime 裡面會呼叫 .stream()
+    我們這裡統一支援 openai/xxx 與其它（視為 Ollama）
+    """
+
+    async def stream(
+        self,
+        model: str,
+        messages: List[Any],
+        temperature: float = 0.3,
+        tools: List[Any] | None = None,
+        options: dict | None = None,
+    ) -> AsyncGenerator[str, None]:
+
+        # OpenAI 系列
+        if model.startswith("openai/"):
+            async for line in stream_openai(
+                model=model,
+                messages=messages,
+                options=options,
+                tools=tools,
+            ):
+                yield line
+            return
+
+        # 其它 → Ollama Gateway
+        async for line in stream_ollama(
+            model=model,
+            messages=messages,
+            tools=tools,
+        ):
+            yield line
+
+
+# 單例
+_llm_client_instance = LLMClient()
+
+def get_llm_client(model: str) -> LLMClient:
+    return _llm_client_instance
