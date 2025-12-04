@@ -83,7 +83,6 @@ async def stream_ollama(
         ) as resp:
             
             async for line in resp.aiter_lines():
-                print("🌊 RAW STREAM >>>", line)  # Debug 輸出
                 if line:
                     yield line  # 再交給 LLMTwins runtime
 
