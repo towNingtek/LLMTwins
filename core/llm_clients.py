@@ -7,7 +7,7 @@ from typing import AsyncGenerator, List, Any
 from dotenv import load_dotenv
 load_dotenv()
 
-# Gateway URL（支援 Ollama Gateway / OpenAI Gateway）
+# Gateway URL（Suport Ollama Gateway / OpenAI Gateway）
 OLLAMA_GATEWAY_URL = os.getenv("OLLAMA_GATEWAY_URL", "http://localhost:8082")
 OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "http://localhost:8002")
 
@@ -18,7 +18,7 @@ OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "http://localhost:8002")
 
 def convert_messages(raw_messages: List[Any]):
     """
-    將 messages 統一成 OpenAI 標準格式：
+    Unify messages into the OpenAI standard format:
     [{"role": "...", "content": "..."}]
     """
     out = []
@@ -95,8 +95,8 @@ async def stream_ollama(
 
 class LLMClient:
     """
-    LLMTwins runtime 裡面會呼叫 .stream()
-    我們這裡統一支援 openai/xxx 與其它（視為 Ollama）
+    The LLMTwins runtime calls `.stream()`.
+    Here, we uniformly support openai/xxx and others (considered as Ollama).
     """
 
     async def stream(
@@ -108,7 +108,7 @@ class LLMClient:
         options: dict | None = None,
     ) -> AsyncGenerator[str, None]:
 
-        # OpenAI 系列
+        # OpenAI
         if model.startswith("openai/"):
             async for line in stream_openai(
                 model=model,

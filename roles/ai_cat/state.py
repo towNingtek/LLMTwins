@@ -1,33 +1,40 @@
 # roles/ai_cat/state.py
-from typing import List, Dict, Any, Optional
-from pydantic import BaseModel, Field
 import yaml
 import os
+from typing import List, Dict, Any, Optional, Annotated
+from pydantic import BaseModel, Field
+from langchain_core.messages import BaseMessage
+from langgraph.graph.message import add_messages
 
 class CatState(BaseModel):
-    # 從 profile.yaml 載入
+    # Load from profile.yaml
     name: str = "ai_cat"
     model: str = "openai/gpt-4o-mini"
     system_prompt: str = ""
     temperature: float = 0.3
     tools: list = Field(default_factory=list)
 
-    # 對話資料
-    messages: List[Dict[str, Any]] = Field(default_factory=list)
+    messages: Annotated[List[BaseMessage], add_messages] = Field(default_factory=list)
+
+    tool_call: Optional[Any] = None
 
     # Node streaming payload
     respond: Optional[Dict[str, Any]] = None
 
-    # 最終輸出
+    # LangGraph need 'next' key
+    next: Optional[str] = None
+
+    # final output
     output: Optional[str] = None
 
     @classmethod
-    def load_profile(cls, messages=None):
+    def load_profile(cls, messages: Optional[List[BaseMessage]] = None):
         profile_path = os.path.join(os.path.dirname(__file__), "profile.yaml")
 
         with open(profile_path, "r", encoding="utf-8") as f:
             p = yaml.safe_load(f)
 
+        # Ensure that the message type is also in the BaseMessage list in load_profile
         return cls(
             name=p.get("name", "ai_cat"),
             model=p.get("model", "openai/gpt-4o-mini"),
