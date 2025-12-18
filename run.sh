@@ -1,2 +1,6 @@
-source env/bin/activate
-uvicorn server:app --host 0.0.0.0 --port 8000 --reload
+# source env/bin/activate
+# uvicorn server:app --host 0.0.0.0 --port 8002 --reload
+
+docker compose -f docker-compose.dev.yml down
+docker compose -f docker-compose.dev.yml up -d
+

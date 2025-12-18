@@ -6,7 +6,7 @@ EXAMPLE='您好，歡迎光臨！請問需要哪方面的協助？
 感謝您的來電，請問我可以如何協助您？
 很高興為您服務，若有問題隨時告訴我。'
 
-curl -sS -N --http1.1 --no-buffer http://localhost:8002/api/chat \
+curl -sS -N --http1.1 --no-buffer http://localhost:8082/api/chat \
   -H 'Content-Type: application/json' \
   -d "$(jq -nc --arg sys "$SYS" --arg ex "$EXAMPLE" '{
     model:"openai/gpt-4o-mini",

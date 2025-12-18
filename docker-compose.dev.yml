@@ -1,0 +1,22 @@
+version: "3.9"
+
+services:
+  llmtwins-api:
+    image: python:3.10-slim
+    container_name: llmtwins-api-dev
+    working_dir: /app
+
+    volumes:
+      - .:/app
+
+    env_file:
+      - .env
+
+    ports:
+      - "8002:8002"
+
+    command: >
+      bash -c "pip install --no-cache-dir -r requirements.txt &&
+               uvicorn server:app --host 0.0.0.0 --port 8002 --reload"
+
+    restart: unless-stopped
