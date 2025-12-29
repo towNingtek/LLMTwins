@@ -23,7 +23,12 @@ def summarize_prompts(language: str = "繁體中文") -> Tuple[str, str]:
         "任務：針對《文件內容》寫出一段完整的文章型摘要，"
         "保持段落連貫，避免條列式。"
     )
-    user = "請撰寫一篇 3–5 段的文章型摘要，涵蓋主要目的、重點內容與可能影響。"
+    user = (
+        "請撰寫一篇 3–5 段的文章型摘要，必須包含以下內容：\n"
+        "1. 計畫主要目的與背景\n"
+        "2. 重點內容與執行方式\n"
+        "3. 預期效應、預期影響或預期效益（若文件中有此段落，請完整納入）"
+    )
     return system, user
 
 def summarize_points_prompts(language: str = "繁體中文") -> Tuple[str, str]:
@@ -105,7 +110,7 @@ def bundle_prompts(task_list: List[str], language: str = "繁體中文") -> Tupl
         "不要輸出任何解釋或 Markdown，只輸出純 JSON。"
         "規格補充："
         "  • plan_name：只回計畫名稱（不是文件標題），務必在 20 字數以內。；"
-        "  • summarize：文章型摘要；"
+        "  • summarize：文章型摘要，需包含計畫目的、重點內容，以及預期效應/影響/效益；"
          "• sdgs：請僅輸出JSON 陣列，長度 3–5；元素為 {\"<1-17>\": \"一句說明\"}。"
         "  • budget：輸出 { \"total\": 整數 }，單位為元，不得包含其他欄位。"
     )
