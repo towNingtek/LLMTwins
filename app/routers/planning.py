@@ -70,7 +70,7 @@ def build_enhanced_prompt(project_info: Optional[Dict], sdg_data: Dict[int, List
         prompt += f"""
 **專案名稱：** {project_info.get('name', 'N/A')}
 **執行期間：** {project_info.get('period', 'N/A')}
-**預算規模：** {project_info.get('budget', 'N/A')} 萬元
+**預算規模：** {project_info.get('budget', 'N/A')} 元
 **主辦單位：** {project_info.get('hoster', 'N/A')}
 **執行範圍：** {project_info.get('location', 'N/A')}
 
