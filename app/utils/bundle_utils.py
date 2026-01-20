@@ -5,6 +5,7 @@ import json
 EMAIL = "minamj@nantou.gov.tw"
 HOSTER_EMAIL = "minamj@nantou.gov.tw"
 ORG = ""
+PROJECT_B = "計畫處"  # 預設地方團隊/執行單位
 PROJECT_START_DATE = "2025-01-01"
 PROJECT_DUE_DATE = "2025-12-31"
 IS_BUDGET_REVEALED = "true"
@@ -20,6 +21,7 @@ def bundle_to_payload(bundle: dict, body: dict = None) -> dict:
         "project_type": "0",  # 預設為 0
         "budget": bundle.get("budget", {}).get("total", 0),
         "org": ORG,
+        "project_b": PROJECT_B,
         "hoster_email": HOSTER_EMAIL,
         "is_budget_revealed": IS_BUDGET_REVEALED,
     }
