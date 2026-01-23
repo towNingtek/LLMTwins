@@ -237,11 +237,35 @@ def docx_to_bundle(docx_path: Path) -> Tuple[Dict[str, Any], List[str]]:
     return bundle, []
 
 
+def extract_full_text_from_docx(docx_path: Path) -> str:
+    """從 DOCX 提取所有文字（用於非範本 DOCX 的 LLM 處理）"""
+    doc = Document(docx_path)
+    texts = []
+
+    # 段落文字
+    for para in doc.paragraphs:
+        if para.text.strip():
+            texts.append(para.text.strip())
+
+    # 表格文字
+    for table in doc.tables:
+        for row in table.rows:
+            row_text = " | ".join(cell.text.strip() for cell in row.cells if cell.text.strip())
+            if row_text:
+                texts.append(row_text)
+
+    return "\n".join(texts)
+
+
 def ingest_docx_and_write_parsed(sess_base: str, session_id: str) -> Dict[str, Any]:
     """
     從 session 目錄讀取 DOCX 並寫入 parsed.json。
 
     與 pdf_ingest.ingest_first_pdf_and_write_parsed 相同的介面。
+
+    行為：
+    - 若符合範本格式：使用範本解析，產生 docx_bundle
+    - 若不符合範本：提取全文，走 LLM 流程（比照 PDF）
     """
     session_dir = Path(sess_base) / session_id
     raw_dir = session_dir / "raw"
@@ -255,28 +279,66 @@ def ingest_docx_and_write_parsed(sess_base: str, session_id: str) -> Dict[str, A
 
     docx_path = docx_files[0]
 
-    # 提取欄位
+    # 嘗試提取範本欄位
     fields, errors = extract_fields_from_docx(docx_path)
 
+    # 若不符合範本格式，改用全文提取（比照 PDF 流程）
     if errors:
-        return {
-            "ok": False,
-            "error": "DOCX 格式驗證失敗",
-            "details": errors,
-            "hint": "請確認您的檔案符合範本格式，可下載範本參考",
+        full_text = extract_full_text_from_docx(docx_path)
+
+        parsed = {
+            "doc": {
+                "sid": session_id,
+                "filename": docx_path.name,
+                "pages": 1,
+                "source": "docx_freeform",  # 標記為非範本 DOCX
+            },
+            "pages": [{"page": 1, "text": full_text}],
+            "chunks": [{"id": 0, "page": 1, "start_char": 0, "end_char": len(full_text), "text": full_text}],
+            # 不含 docx_bundle，會走 LLM 流程
         }
 
-    # 建立 bundle
+        parsed_path = artifacts_dir / "parsed.json"
+        with open(parsed_path, "w", encoding="utf-8") as f:
+            json.dump(parsed, f, ensure_ascii=False, indent=2)
+
+        return {
+            "ok": True,
+            "filename": docx_path.name,
+            "mode": "llm_fallback",
+            "reason": "DOCX 格式不符範本，將使用 LLM 智能抽取",
+        }
+
+    # 建立 bundle（範本格式）
     bundle, bundle_errors = docx_to_bundle(docx_path)
 
     if bundle_errors:
-        return {
-            "ok": False,
-            "error": "DOCX 轉換失敗",
-            "details": bundle_errors,
+        # bundle 轉換失敗也走 LLM 流程
+        full_text = extract_full_text_from_docx(docx_path)
+
+        parsed = {
+            "doc": {
+                "sid": session_id,
+                "filename": docx_path.name,
+                "pages": 1,
+                "source": "docx_freeform",
+            },
+            "pages": [{"page": 1, "text": full_text}],
+            "chunks": [{"id": 0, "page": 1, "start_char": 0, "end_char": len(full_text), "text": full_text}],
         }
 
-    # 建立與 PDF parsed.json 相容的格式
+        parsed_path = artifacts_dir / "parsed.json"
+        with open(parsed_path, "w", encoding="utf-8") as f:
+            json.dump(parsed, f, ensure_ascii=False, indent=2)
+
+        return {
+            "ok": True,
+            "filename": docx_path.name,
+            "mode": "llm_fallback",
+            "reason": "DOCX 轉換失敗，將使用 LLM 智能抽取",
+        }
+
+    # 建立與 PDF parsed.json 相容的格式（範本模式）
     full_text = build_philosophy(fields)
 
     parsed = {
@@ -301,6 +363,7 @@ def ingest_docx_and_write_parsed(sess_base: str, session_id: str) -> Dict[str, A
     return {
         "ok": True,
         "filename": docx_path.name,
+        "mode": "template",
         "fields_found": list(fields.keys()),
         "bundle": bundle,
     }
