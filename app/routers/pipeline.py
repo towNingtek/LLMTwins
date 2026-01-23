@@ -151,17 +151,59 @@ async def api_cms_upload(request: Request, body: Dict[str, Any] = Body(...)):
     return {"uuid": uuid, "raw": raw}
 """
 from app.utils.llm_pipeline import build_bundle_fields
+from app.utils.bundle_utils import bundle_to_payload
+
 @router.post("/sessions/{session_id}/pipeline/one_click")
 async def api_one_click_pipeline(session_id: str, request: Request, body: Dict[str, Any] = Body(None)):
     import json, hashlib
     from pathlib import Path
-    
+
     settings = request.app.state.settings
 
     st = read_state(settings.sess_base, session_id) or {}
     st.update({"session_id": session_id, "sess_base": settings.sess_base, "settings": settings})
 
-    # 從 artifacts/parsed.json 讀出各 chunk 的 text，串成純文字並截長。
+    # 檢查是否為 DOCX（有預先抽取的 bundle）
+    parsed_path = Path(settings.sess_base) / session_id / "artifacts" / "parsed.json"
+    docx_bundle = None
+    if parsed_path.exists():
+        pj = json.loads(parsed_path.read_text(encoding="utf-8"))
+        docx_bundle = pj.get("docx_bundle")
+
+    # 如果是 DOCX，使用預先抽取的 bundle（但需要 LLM 生成 SDGs）
+    if docx_bundle:
+        logger.info("[one_click] DOCX detected, using pre-extracted bundle")
+        plain = extract_plaintext(settings.sess_base, session_id, max_chars=20000)
+
+        # 呼叫 LLM 生成 SDGs
+        try:
+            from app.utils.llm_pipeline import generate_sdgs_only
+            sdgs = await generate_sdgs_only(settings, plain)
+            docx_bundle["sdgs"] = sdgs
+        except Exception as e:
+            logger.warning(f"[one_click] SDGs generation failed: {e}, using empty SDGs")
+            docx_bundle["sdgs"] = []
+
+        payload = bundle_to_payload(docx_bundle, body)
+
+        try:
+            status, data, raw = await post_cms_upload(payload, settings.cms_upload_url)
+            if status >= 400:
+                raise HTTPException(status_code=status, detail=data or {"raw": raw})
+
+            uuid = (data or {}).get("uuid")
+            if not uuid:
+                raise HTTPException(status_code=502, detail={"reason": "missing uuid", "data": data, "raw": raw})
+
+            cms_link = settings.cms_website_url + f"/content/{uuid}"
+            return {"uuid": uuid, "cmsLink": cms_link, "source": "docx_template"}
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.exception("[one_click] DOCX pipeline failed: %s", e)
+            raise HTTPException(status_code=500, detail={"reason": "DOCX pipeline failed", "error": str(e)})
+
+    # PDF 流程：從 artifacts/parsed.json 讀出各 chunk 的 text，串成純文字並截長。
     plain = extract_plaintext(settings.sess_base, session_id, max_chars=20000)
     if not plain:
         logger.warning("[one_click] plain is empty, fallback to parsed.json")
@@ -217,3 +259,32 @@ async def api_one_click_pipeline(session_id: str, request: Request, body: Dict[s
     except Exception as e:
         logger.exception("[one_click] bundle pipeline failed: %s", e)
         raise HTTPException(status_code=500, detail={"reason": "bundle pipeline failed", "error": str(e)})
+
+
+@router.post("/sessions/{session_id}/pipeline/test_bundle")
+async def api_test_bundle(session_id: str, request: Request, body: Dict[str, Any] = Body(None)):
+    """
+    測試用端點：只執行 bundle 提取，不上傳 CMS。
+    用於 A/B 測試辨識率。
+    """
+    settings = request.app.state.settings
+
+    st = read_state(settings.sess_base, session_id) or {}
+    st.update({"session_id": session_id, "sess_base": settings.sess_base, "settings": settings})
+
+    plain = extract_plaintext(settings.sess_base, session_id, max_chars=20000)
+    if not plain:
+        raise HTTPException(status_code=400, detail="No parsed text found. Upload PDF first.")
+
+    try:
+        bundle, payload = await build_bundle_fields(settings, plain, body)
+        return {
+            "session_id": session_id,
+            "bundle": bundle,
+            "payload": payload,
+            "plain_preview": plain[:500] if plain else "",
+            "plain_length": len(plain) if plain else 0,
+        }
+    except Exception as e:
+        logger.exception("[test_bundle] failed: %s", e)
+        raise HTTPException(status_code=500, detail={"error": str(e)})

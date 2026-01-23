@@ -2,7 +2,7 @@
 import json
 import aiohttp
 from app.utils.bundle_utils import bundle_to_payload
-from app.utils.prompts import bundle_prompts
+from app.utils.prompts import bundle_prompts, sdgs_prompts
 from app.utils.extractor import extract_plan_name, extract_budget_rules
 
 async def call_gateway_chat(base_url: str, model: str, system: str, user: str, timeout_s: int = 60):
@@ -80,3 +80,29 @@ async def build_bundle_fields(settings, full_text: str, body: dict = None):
     payload = bundle_to_payload(bundle, body)
 
     return bundle, payload
+
+
+async def generate_sdgs_only(settings, full_text: str):
+    """
+    只生成 SDGs（給 DOCX 用，因為 DOCX 範本沒有 SDGs 欄位）
+    """
+    system, user = sdgs_prompts(language="繁體中文")
+
+    result_json = await call_gateway_chat(
+        base_url=settings.ollama_base_url,
+        model="openai/gpt-4o-mini",
+        system=system,
+        user=f"《文件內容》\n{full_text}\n\n{user}",
+        timeout_s=settings.upstream_timeout_s,
+    )
+
+    content = (result_json.get("message") or {}).get("content", "")
+
+    try:
+        sdgs = json.loads(content) if isinstance(content, str) else content
+        if not isinstance(sdgs, list):
+            sdgs = []
+    except Exception:
+        sdgs = []
+
+    return sdgs

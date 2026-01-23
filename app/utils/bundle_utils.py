@@ -12,16 +12,19 @@ IS_BUDGET_REVEALED = "true"
 # =====================================
 
 def bundle_to_payload(bundle: dict, body: dict = None) -> dict:
+    # 檢查是否有 DOCX 專屬欄位
+    docx_fields = bundle.get("_docx_fields", {})
+
     payload = {
         "email": body.get("email", EMAIL) if body else EMAIL,
         "name": bundle.get("plan_name", ""),
-        "project_start_date": PROJECT_START_DATE,
-        "project_due_date": PROJECT_DUE_DATE,
+        "project_start_date": docx_fields.get("start_date") or PROJECT_START_DATE,
+        "project_due_date": docx_fields.get("end_date") or PROJECT_DUE_DATE,
         "philosophy": bundle.get("summarize", ""),
         "project_type": "0",  # 預設為 0
         "budget": bundle.get("budget", {}).get("total", 0),
         "org": ORG,
-        "project_b": PROJECT_B,
+        "project_b": docx_fields.get("project_b") or PROJECT_B,
         "hoster_email": HOSTER_EMAIL,
         "is_budget_revealed": IS_BUDGET_REVEALED,
     }
