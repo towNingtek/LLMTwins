@@ -165,10 +165,25 @@ async def api_one_click_pipeline(session_id: str, request: Request, body: Dict[s
 
     # 檢查是否為 DOCX（有預先抽取的 bundle）
     parsed_path = Path(settings.sess_base) / session_id / "artifacts" / "parsed.json"
+    raw_dir = Path(settings.sess_base) / session_id / "raw"
     docx_bundle = None
+    is_docx_upload = bool(list(raw_dir.glob("*.docx")))
+
     if parsed_path.exists():
         pj = json.loads(parsed_path.read_text(encoding="utf-8"))
         docx_bundle = pj.get("docx_bundle")
+
+    # 如果上傳的是 DOCX 但沒有 bundle，表示格式驗證失敗
+    if is_docx_upload and not docx_bundle:
+        logger.warning("[one_click] DOCX uploaded but no bundle found - template validation failed")
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "DOCX 格式不符合範本",
+                "hint": "請使用正確的 DOCX 範本格式，可從上傳區下載範本參考",
+                "required_fields": ["單位名稱", "計畫名稱", "計畫摘要", "計畫期間", "經費概數"],
+            }
+        )
 
     # 如果是 DOCX，使用預先抽取的 bundle（但需要 LLM 生成 SDGs）
     if docx_bundle:
