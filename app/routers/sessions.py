@@ -12,6 +12,7 @@ from app.session_utils import (
     init_session_dirs, write_effective_template
 )
 from app.services.ingest_service import parse_first_pdf_and_write
+from app.docx_ingest import ingest_docx_and_write_parsed
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
@@ -66,16 +67,17 @@ async def upload_to_session(session_id: str, request: Request,
    orig_name = Path(orig_name).name
    suffix = Path(orig_name).suffix.lower()
 
-   # 如果是 PDF，先清理舊的 PDF 檔案和解析結果
-   if suffix == ".pdf":
-       # 清理舊的 PDF 檔案
-       for old_pdf in raw_dir.glob("*.pdf"):
-           try:
-               old_pdf.unlink()
-               logger.info(f"Removed old PDF: {old_pdf.name}")
-           except Exception as e:
-               logger.warning(f"Failed to remove old PDF {old_pdf.name}: {e}")
-       
+   # 如果是 PDF 或 DOCX，先清理舊的檔案和解析結果
+   if suffix in [".pdf", ".docx"]:
+       # 清理舊的 PDF 和 DOCX 檔案
+       for pattern in ["*.pdf", "*.docx"]:
+           for old_file in raw_dir.glob(pattern):
+               try:
+                   old_file.unlink()
+                   logger.info(f"Removed old file: {old_file.name}")
+               except Exception as e:
+                   logger.warning(f"Failed to remove {old_file.name}: {e}")
+
        # 清理舊的解析結果
        artifacts_dir = d / "artifacts"
        if artifacts_dir.exists():
@@ -117,10 +119,17 @@ async def upload_to_session(session_id: str, request: Request,
    parse_result = None
    if suffix == ".pdf" and auto_parse:
        try:
-           # Debug msg
            parse_result = parse_first_pdf_and_write(session_id, base_dir, sess_base, state_store, model="project")
        except Exception as e:
            parse_result = {"ok": False, "error": f"parse failed: {e}"}
+   elif suffix == ".docx" and auto_parse:
+       try:
+           parse_result = ingest_docx_and_write_parsed(sess_base, session_id)
+           if not parse_result.get("ok"):
+               # DOCX 格式驗證失敗，提供詳細錯誤
+               logger.warning(f"DOCX parse failed: {parse_result}")
+       except Exception as e:
+           parse_result = {"ok": False, "error": f"DOCX parse failed: {e}"}
 
    return {
        "ok": True,
