@@ -1,9 +1,56 @@
 # app/core/streaming.py
 import json, aiohttp, asyncio
-from typing import AsyncGenerator, Optional, List
+from typing import AsyncGenerator, Optional, List, Tuple
 from fastapi import Request
 from fastapi.responses import StreamingResponse
 from app.core.ndjson import ndjson_line
+from app.logger import logger
+
+
+# ===== OpenAI 錯誤處理 =====
+def parse_openai_error(status: int, error_body: str) -> Tuple[str, str, bool]:
+    """
+    解析 OpenAI API 錯誤，返回 (錯誤類型, 友善訊息, 是否為額度問題)
+    """
+    try:
+        data = json.loads(error_body)
+        error = data.get("error", {})
+        error_type = error.get("type", "unknown")
+        error_code = error.get("code", "")
+        error_message = error.get("message", error_body)
+    except json.JSONDecodeError:
+        error_type = "unknown"
+        error_code = ""
+        error_message = error_body
+
+    # 額度不足
+    if status == 429 and error_code == "insufficient_quota":
+        logger.error(f"[OpenAI] 額度不足: {error_message}")
+        return "insufficient_quota", "AI 服務額度已用完，請聯繫系統管理員充值。", True
+
+    # 請求速率限制
+    if status == 429 and error_type == "rate_limit_exceeded":
+        logger.warning(f"[OpenAI] 請求過於頻繁: {error_message}")
+        return "rate_limit", "請求過於頻繁，請稍後再試。", False
+
+    # API Key 無效
+    if status == 401:
+        logger.error(f"[OpenAI] API Key 無效: {error_message}")
+        return "invalid_api_key", "AI 服務認證失敗，請聯繫系統管理員。", True
+
+    # 存取被拒
+    if status == 403:
+        logger.error(f"[OpenAI] 存取被拒: {error_message}")
+        return "access_denied", "AI 服務存取被拒，請聯繫系統管理員。", True
+
+    # 服務不可用
+    if status >= 500:
+        logger.error(f"[OpenAI] 服務錯誤 ({status}): {error_message}")
+        return "server_error", "AI 服務暫時無法使用，請稍後再試。", False
+
+    # 其他錯誤
+    logger.warning(f"[OpenAI] 未知錯誤 ({status}): {error_message}")
+    return error_type, f"AI 服務發生錯誤：{error_message[:100]}", False
 
 async def proxy_streaming(
     request: Request,
@@ -57,11 +104,22 @@ async def proxy_streaming(
         )
 
         if resp.status >= 400:
-            err = await resp.read()
+            err_body = await resp.read()
             await resp.release()
             await session.close()
-            # 直接把錯誤往外丟，由呼叫端決定回 JSONResponse
-            raise RuntimeError(err.decode("utf-8", "ignore"))
+
+            # 解析 OpenAI 錯誤並返回友善訊息
+            err_str = err_body.decode("utf-8", "ignore")
+            error_type, friendly_msg, is_critical = parse_openai_error(resp.status, err_str)
+
+            # 組合錯誤訊息：包含友善訊息和錯誤類型
+            error_payload = json.dumps({
+                "error": friendly_msg,
+                "error_type": error_type,
+                "status": resp.status,
+                "is_critical": is_critical
+            }, ensure_ascii=False)
+            raise RuntimeError(error_payload)
 
         async def gen():
             got_any = False

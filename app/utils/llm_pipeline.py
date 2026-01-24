@@ -4,6 +4,41 @@ import aiohttp
 from app.utils.bundle_utils import bundle_to_payload
 from app.utils.prompts import bundle_prompts, sdgs_prompts
 from app.utils.extractor import extract_plan_name, extract_budget_rules
+from app.logger import logger
+
+
+def parse_openai_error_simple(status: int, error_body: str) -> str:
+    """
+    解析 OpenAI API 錯誤，返回友善訊息
+    """
+    try:
+        data = json.loads(error_body)
+        error = data.get("error", {})
+        error_code = error.get("code", "")
+        error_message = error.get("message", error_body)
+    except json.JSONDecodeError:
+        error_code = ""
+        error_message = error_body
+
+    if status == 429 and error_code == "insufficient_quota":
+        logger.error(f"[OpenAI] 額度不足: {error_message}")
+        return "AI 服務額度已用完，請聯繫系統管理員充值。"
+    if status == 429:
+        logger.warning(f"[OpenAI] 請求過於頻繁: {error_message}")
+        return "請求過於頻繁，請稍後再試。"
+    if status == 401:
+        logger.error(f"[OpenAI] API Key 無效: {error_message}")
+        return "AI 服務認證失敗，請聯繫系統管理員。"
+    if status == 403:
+        logger.error(f"[OpenAI] 存取被拒: {error_message}")
+        return "AI 服務存取被拒，請聯繫系統管理員。"
+    if status >= 500:
+        logger.error(f"[OpenAI] 服務錯誤 ({status}): {error_message}")
+        return "AI 服務暫時無法使用，請稍後再試。"
+
+    logger.warning(f"[OpenAI] 未知錯誤 ({status}): {error_message}")
+    return f"AI 服務發生錯誤：{error_message[:100]}"
+
 
 async def call_gateway_chat(base_url: str, model: str, system: str, user: str, timeout_s: int = 60):
     """
@@ -22,6 +57,12 @@ async def call_gateway_chat(base_url: str, model: str, system: str, user: str, t
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout_s)) as session:
         async with session.post(f"{base_url}/api/chat", json=body) as resp:
             txt = await resp.text()
+
+            # 處理 OpenAI API 錯誤
+            if resp.status >= 400:
+                friendly_msg = parse_openai_error_simple(resp.status, txt)
+                raise RuntimeError(friendly_msg)
+
             try:
                 js = json.loads(txt)
             except Exception:
