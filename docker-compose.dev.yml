@@ -16,7 +16,10 @@ services:
       - "8002:8002"
 
     command: >
-      bash -c "pip install --no-cache-dir -r requirements.txt &&
+      bash -c "apt-get update &&
+               apt-get install -y tesseract-ocr tesseract-ocr-chi-tra tesseract-ocr-chi-sim tesseract-ocr-eng poppler-utils ghostscript &&
+               rm -rf /var/lib/apt/lists/* &&
+               pip install --no-cache-dir -r requirements.txt &&
                uvicorn server:app --host 0.0.0.0 --port 8002 --reload"
 
     restart: unless-stopped

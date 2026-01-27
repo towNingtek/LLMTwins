@@ -235,8 +235,24 @@ async def proxy_streaming(
             headers["X-Session-Mode"] = "stateless"
         return StreamingResponse(gen(), media_type=resp.headers.get("Content-Type","application/x-ndjson"), headers=headers)
 
+    except RuntimeError as e:
+        # OpenAI 錯誤（已解析為友善訊息）→ 直接回傳錯誤
+        error_str = str(e)
+        try:
+            error_data = json.loads(error_str)
+            friendly_msg = error_data.get("error", "AI 服務發生錯誤")
+        except:
+            friendly_msg = error_str
+
+        async def error_gen():
+            yield ndjson_line({"message": {"role": "assistant", "content": friendly_msg}, "done": False})
+            yield ndjson_line({"done": True})
+
+        headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "X-Session-Mode": "session" if session_mode else "stateless"}
+        return StreamingResponse(error_gen(), media_type="application/x-ndjson", headers=headers)
+
     except Exception:
-        # 外層錯誤 → 直接使用假串流降級
+        # 其他錯誤 → 假串流降級
         async def fallback_gen():
             async for c in _fake_stream_from_full():
                 yield c
