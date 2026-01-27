@@ -1,16 +1,26 @@
 services:
-  llmtwins:
-    build: .
-    image: yillkid/llmtwins:0.1.0
-    ports:
-      - "8000:8000"
-    restart: unless-stopped
-    environment:
-      # 依你專案需要放環境變數（例）
-      OPENAI_API_KEY: "${OPENAI_API_KEY}"
-      # 其它自訂變數...
-    volumes:
-      # 若要持久化這些目錄，就把它們掛出來
-      - ./sessions:/app/sessions
-      - ./upload:/app/upload
+  llmtwins-nantou-gov:
+    image: python:3.11-slim
+    container_name: llmtwins-nantou-gov
+    working_dir: /app
 
+    env_file:
+      - .env
+
+    volumes:
+      - .:/app
+
+    ports:
+      - "7998:7998"
+
+    command: >
+      bash -c "
+      apt-get update &&
+      apt-get install -y tesseract-ocr tesseract-ocr-chi-tra tesseract-ocr-chi-sim tesseract-ocr-eng poppler-utils ghostscript &&
+      rm -rf /var/lib/apt/lists/* &&
+      pip install --upgrade pip &&
+      pip install -r requirements.txt &&
+      uvicorn server:app --host 0.0.0.0 --port 7998 --reload
+      "
+
+    restart: unless-stopped
