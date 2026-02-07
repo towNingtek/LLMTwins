@@ -39,6 +39,8 @@ ALLOWED_ORIGINS = [
     "https://beta-nsdgs.4impact.cc",
     "https://ntsdgs.4impact.cc",
     "https://eva.4impact.cc",
+    "https://tplanet.4impact.cc",
+    "https://test-multi-tenant.4impact.cc",
     # "http://localhost:3000",
     # "http://localhost:5173",
     # "http://127.0.0.1:5173",
