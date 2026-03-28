@@ -1,12 +1,12 @@
 # app/pdf_ingest.py
 # -*- coding: utf-8 -*-
 """
-PDF ingestion with OCR fallback (ocrmypdf) + pdfminer extraction + safe chunking.
+PDF ingestion with AI Vision OCR fallback + pdfminer extraction + safe chunking.
 產出 parsed.json 的 payload，並回傳執行情況與品質標記（ocr_used/ocr_quality）。
 """
 
 from __future__ import annotations
-import os, re, json, glob, subprocess
+import os, re, json, glob, subprocess, base64, io
 from pathlib import Path
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -18,6 +18,8 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=True)
 
 import yaml
+import aiohttp
+import fitz  # PyMuPDF
 from pdfminer.high_level import extract_text
 
 # ---------------------- 動態抓設定 ----------------------
@@ -100,28 +102,63 @@ def _extract_pages_text(pdf_path: str) -> List[str]:
     pages = [p for p in full.split("\x0c") if p.strip()] or [full]
     return [_clean_text(p) for p in pages]
 
-def _ocr_pdf_to_searchable(src_pdf: Path, dst_pdf: Path, *, lang: str, timeout_sec: int) -> Dict[str, Any]:
-    cmd = [
-        "ocrmypdf",
-        "--skip-text",
-        "--optimize", "0",
-        "--deskew",
-        "--rotate-pages",
-        "--language", lang,
-        "--tesseract-timeout", "300",# infos = await Promise
-        str(src_pdf),
-        str(dst_pdf),
-    ]
+def _pdf_page_to_base64(pdf_path: Path, page_index: int, dpi: int = 200) -> str:
+    """將 PDF 單頁渲染為 PNG 並回傳 base64 字串。"""
+    doc = fitz.open(str(pdf_path))
+    page = doc.load_page(page_index)
+    pix = page.get_pixmap(dpi=dpi, alpha=False)
+    img_bytes = pix.tobytes("png")
+    return base64.b64encode(img_bytes).decode("utf-8")
+
+def _ocr_page_vision(base_url: str, model: str, img_b64: str, page_num: int, timeout_s: int = 120) -> str:
+    """透過 Ollama Gateway 呼叫 Vision API 辨識單頁。"""
+    import requests
+    body = {
+        "model": model,
+        "stream": False,
+        "temperature": 0.0,
+        "messages": [
+            {"role": "system", "content": (
+                "你是一個專業的 OCR 助手。請將圖片中的所有文字完整辨識出來，"
+                "保留原始的段落結構和表格格式。如果有表格，請用 markdown 表格格式呈現。"
+                "如果有手寫文字，請盡量辨識並標記 [手寫]。"
+                "只輸出辨識結果，不要加任何說明。"
+            )},
+            {"role": "user", "content": [
+                {"type": "text", "text": f"請辨識第 {page_num} 頁的所有文字內容："},
+                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_b64}"}}
+            ]}
+        ],
+    }
+    try:
+        resp = requests.post(f"{base_url}/api/chat", json=body, timeout=timeout_s)
+        js = resp.json()
+        return (js.get("message") or {}).get("content", "")
+    except Exception as e:
+        logger.error(f"[ingest] Vision OCR page {page_num} failed: {e}")
+        return ""
+
+def _ocr_pdf_vision(pdf_path: Path, *, timeout_sec: int = 600) -> Dict[str, Any]:
+    """用 Vision API 對整份 PDF 做 OCR，回傳每頁文字。"""
+    base_url = os.getenv("OCR_GATEWAY_URL", os.getenv("OLLAMA_BASE_URL", "http://localhost:8002"))
+    model = os.getenv("OCR_VISION_MODEL", "openai/gpt-4o")
+    dpi = int(os.getenv("OCR_VISION_DPI", "200"))
 
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_sec)
-        return {"ok": r.returncode == 0, "code": r.returncode, "stdout": r.stdout, "stderr": r.stderr}
-    except FileNotFoundError:
-        return {"ok": False, "code": -1, "error": "ocrmypdf not found"}
-    except subprocess.TimeoutExpired:
-        return {"ok": False, "code": -2, "error": f"OCR timeout > {timeout_sec}s"}
+        doc = fitz.open(str(pdf_path))
+        n_pages = len(doc)
+        doc.close()
+
+        pages_text = []
+        for i in range(n_pages):
+            logger.info(f"[ingest] 🔍 Vision OCR page {i+1}/{n_pages}...")
+            img_b64 = _pdf_page_to_base64(pdf_path, i, dpi=dpi)
+            text = _ocr_page_vision(base_url, model, img_b64, i + 1, timeout_s=60)
+            pages_text.append(_clean_text(text))
+
+        return {"ok": True, "pages": pages_text}
     except Exception as e:
-        return {"ok": False, "code": -3, "error": repr(e)}
+        return {"ok": False, "error": repr(e), "pages": []}
 
 def _pages_quality_flag(pages: List[str]) -> str:
     if not pages:
@@ -185,33 +222,23 @@ def ingest_first_pdf_and_write_parsed(
     
     if total_len1 < cfg["OCR_TEXTLEN_THRESHOLD"] and cfg["OCR_ENABLED"]:
         logger.info(f"[ingest] 🔍 OCR condition met: total_len1({total_len1}) < threshold({cfg['OCR_TEXTLEN_THRESHOLD']})")
-        
-        ocr_pdf = art_dir / "ocr_searchable.pdf"
-        logger.info(f"[ingest] 🚀 Starting OCR: {pdf_path} -> {ocr_pdf}")
-        
-        ocr_res = _ocr_pdf_to_searchable(
-            pdf_path, ocr_pdf,
-            lang=cfg["OCR_LANG"],
-            timeout_sec=cfg["OCR_TIMEOUT_SEC"]
-        )
-        
-        logger.info(f"[ingest] 📊 OCR result: {ocr_res}")
-        
+        logger.info(f"[ingest] 🚀 Starting Vision OCR: {pdf_path}")
+
+        ocr_res = _ocr_pdf_vision(pdf_path, timeout_sec=cfg["OCR_TIMEOUT_SEC"])
+
         if ocr_res.get("ok"):
-            logger.info(f"[ingest] ✅ OCR succeeded, extracting text from {ocr_pdf}")
-            pages2 = _extract_pages_text(str(ocr_pdf))
-            
+            pages2 = ocr_res["pages"]
             total_len2 = sum(len(p) for p in pages2)
-            logger.info(f"[ingest] 📏 OCR extracted length: {total_len2} (original: {total_len1})")
-            
+            logger.info(f"[ingest] 📏 Vision OCR extracted length: {total_len2} (original: {total_len1})")
+
             if total_len2 > total_len1:
                 pages_final = pages2
                 ocr_used = True
-                logger.info(f"[ingest] ✨ Using OCR results")
+                logger.info(f"[ingest] ✨ Using Vision OCR results")
             else:
-                logger.warning(f"[ingest] ⚠️ OCR didn't improve results, keeping original")
+                logger.warning(f"[ingest] ⚠️ Vision OCR didn't improve results, keeping original")
         else:
-            logger.error(f"[ingest] ❌ OCR failed: {ocr_res}")
+            logger.error(f"[ingest] ❌ Vision OCR failed: {ocr_res.get('error')}")
     else:
         logger.info(f"[ingest] ⏭️ Skipping OCR: total_len1={total_len1}, threshold={cfg.get('OCR_TEXTLEN_THRESHOLD')}, enabled={cfg.get('OCR_ENABLED')}")
 

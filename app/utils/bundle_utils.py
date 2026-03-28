@@ -1,14 +1,27 @@
 # bundle_utils.py
 import json
+from datetime import datetime
 
 # ==== 可修改區（之後你要寫在 config 或 env）====
 EMAIL = "minamj@nantou.gov.tw"
 HOSTER_EMAIL = "minamj@nantou.gov.tw"
 ORG = ""
 PROJECT_B = "計畫處"  # 預設地方團隊/執行單位
-PROJECT_START_DATE = "2025-01-01"
-PROJECT_DUE_DATE = "2025-12-31"
 IS_BUDGET_REVEALED = "true"
+
+def _to_mmddyyyy(date_str):
+    """YYYY-MM-DD → MM/DD/YYYY"""
+    try:
+        d = datetime.strptime(date_str, "%Y-%m-%d")
+        return d.strftime("%m/%d/%Y")
+    except:
+        return date_str
+
+def _default_start_date():
+    return f"01/01/{datetime.now().year}"
+
+def _default_due_date():
+    return f"12/31/{datetime.now().year}"
 # =====================================
 
 def bundle_to_payload(bundle: dict, body: dict = None) -> dict:
@@ -18,14 +31,14 @@ def bundle_to_payload(bundle: dict, body: dict = None) -> dict:
     payload = {
         "email": body.get("email", EMAIL) if body else EMAIL,
         "name": bundle.get("plan_name", ""),
-        "project_start_date": docx_fields.get("start_date") or PROJECT_START_DATE,
-        "project_due_date": docx_fields.get("end_date") or PROJECT_DUE_DATE,
+        "project_start_date": _to_mmddyyyy(docx_fields.get("start_date") or bundle.get("project_start_date") or "") or _default_start_date(),
+        "project_due_date": _to_mmddyyyy(docx_fields.get("end_date") or bundle.get("project_due_date") or "") or _default_due_date(),
         "philosophy": bundle.get("summarize", ""),
         "project_type": "0",  # 預設為 0
         "budget": bundle.get("budget", {}).get("total", 0),
         "org": ORG,
-        "project_b": docx_fields.get("project_b") or PROJECT_B,
-        "hoster_email": HOSTER_EMAIL,
+        "project_b": docx_fields.get("project_b") or bundle.get("project_b") or PROJECT_B,
+        "hoster_email": body.get("hoster_email", body.get("email", HOSTER_EMAIL)) if body else HOSTER_EMAIL,
         "is_budget_revealed": IS_BUDGET_REVEALED,
     }
 

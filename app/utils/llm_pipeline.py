@@ -33,7 +33,7 @@ async def build_bundle_fields(settings, full_text: str, body: dict = None):
     使用 bundle prompts 讓 LLM 直接生成 bundle → 再轉成 payload
     """
     system, user = bundle_prompts(
-        task_list=["plan_name", "summarize", "budget", "sdgs"],
+        task_list=["plan_name", "summarize", "budget", "sdgs", "project_b", "project_start_date", "project_due_date"],
         language="繁體中文"
     )
     # 先做快篩（rule-based）
