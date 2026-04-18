@@ -29,7 +29,7 @@ def bundle_to_payload(bundle: dict, body: dict = None) -> dict:
     docx_fields = bundle.get("_docx_fields", {})
 
     payload = {
-        "email": body.get("email", EMAIL) if body else EMAIL,
+        "email": (body.get("email") or EMAIL) if body else EMAIL,
         "name": bundle.get("plan_name", "")[:30],
         "project_start_date": _to_mmddyyyy(docx_fields.get("start_date") or bundle.get("project_start_date") or "") or _default_start_date(),
         "project_due_date": _to_mmddyyyy(docx_fields.get("end_date") or bundle.get("project_due_date") or "") or _default_due_date(),
@@ -38,7 +38,7 @@ def bundle_to_payload(bundle: dict, body: dict = None) -> dict:
         "budget": bundle.get("budget", {}).get("total", 0),
         "org": ORG,
         "project_b": (docx_fields.get("project_b") or bundle.get("project_b") or PROJECT_B)[:20],
-        "hoster_email": body.get("hoster_email", body.get("email", HOSTER_EMAIL)) if body else HOSTER_EMAIL,
+        "hoster_email": (body.get("hoster_email") or body.get("email") or HOSTER_EMAIL) if body else HOSTER_EMAIL,
         "is_budget_revealed": IS_BUDGET_REVEALED,
     }
 
